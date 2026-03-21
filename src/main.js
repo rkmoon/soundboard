@@ -6,18 +6,27 @@
 //  sequence after DOMContentLoaded.
 // ═══════════════════════════════════════════════════════════════
 
-import { data, rt, ui, makeSeq, normalizePad, normalizeSeq, getSeq, sliderToSec } from './js/state.js';
+import { data, rt, ui, makeSeq, normalizePad, normalizeSeq, getSeq, sliderToSec, SEQ_LIST_ONLY_WIDTH, PAD_COLOR_PALETTE } from './js/state.js';
 import { setSequencerPanelOpen, setSequenceEditorOpen, syncSeqDefaultCrossfadeUI, getSequencerEditorWidthBounds, resolvePanelWidthForRowVisibility } from './js/resize.js';
 import { startProgressLoop } from './js/audio.js';
 import { stopSequencer, stopAll } from './js/sequencer.js';
 import { renderPadGrid } from './js/pad-ui.js';
 import { renderSeqList, renderSeqOverview, renderSeqSteps, updateSeqTransportUI, selectSequence, openSeqEditor } from './js/seq-ui.js';
-import { openNewPadModal, closePadModal, savePadModal, deletePad, syncPadModalDisplays, openStepModal, closeStepModal, saveStepModal, updateStepModalDuration, syncSwatches, browseAudioFiles } from './js/modals.js';
+import { openNewPadModal, closePadModal, savePadModal, deletePad, syncPadModalDisplays, syncPadTrimDisplays, previewPadModalClip, openStepModal, closeStepModal, saveStepModal, updateStepModalDuration, syncSwatches, browseAudioFiles } from './js/modals.js';
 import { queueAutosave, saveAutosave, loadAutosave, saveProject, openProject, newProject } from './js/persistence.js';
 
 window.addEventListener('DOMContentLoaded', () => {
+  const AVAILABLE_THEMES = new Set(['midnight', 'tokyo-night', 'dracula', 'one-dark', 'nord', 'gruvbox-dark', 'lsu-night']);
+
+  const applyTheme = themeKey => {
+    const resolved = AVAILABLE_THEMES.has(themeKey) ? themeKey : 'lsu-night';
+    ui.themeKey = resolved;
+    document.documentElement.dataset.theme = resolved;
+  };
+
   // -- Restore autosave ----------------------------------------
   loadAutosave();
+  applyTheme(ui.themeKey);
 
   // Migrate and normalise loaded data (fills in missing fields from older saves)
   data.pads.forEach(normalizePad);
@@ -40,14 +49,52 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   // -- Header buttons ------------------------------------------
-  document.getElementById('btn-new').addEventListener('click', newProject);
-  document.getElementById('btn-open').addEventListener('click', openProject);
-  document.getElementById('btn-save').addEventListener('click', saveProject);
-  document.getElementById('btn-stop-all').addEventListener('click', stopAll);
-  document.getElementById('btn-toggle-sequencer').addEventListener('click', () => {
-    setSequencerPanelOpen(!ui.seqPanelOpen);
-    queueAutosave();
-  });
+  const newBtn = document.getElementById('btn-new');
+  const openBtn = document.getElementById('btn-open');
+  const saveBtn = document.getElementById('btn-save');
+  const projectNewBtn = document.getElementById('btn-project-new');
+  const projectOpenBtn = document.getElementById('btn-project-open');
+  const projectSaveBtn = document.getElementById('btn-project-save');
+  const projectMenu = document.getElementById('project-menu');
+  const stopAllBtn = document.getElementById('btn-stop-all');
+  const toggleSequencerBtn = document.getElementById('btn-toggle-sequencer');
+  const themeSelect = document.getElementById('theme-select');
+  if (newBtn) newBtn.addEventListener('click', newProject);
+  if (openBtn) openBtn.addEventListener('click', openProject);
+  if (saveBtn) saveBtn.addEventListener('click', saveProject);
+  if (projectNewBtn) {
+    projectNewBtn.addEventListener('click', () => {
+      newProject();
+      if (projectMenu) projectMenu.removeAttribute('open');
+    });
+  }
+  if (projectOpenBtn) {
+    projectOpenBtn.addEventListener('click', async () => {
+      await openProject();
+      if (projectMenu) projectMenu.removeAttribute('open');
+    });
+  }
+  if (projectSaveBtn) {
+    projectSaveBtn.addEventListener('click', async () => {
+      await saveProject();
+      if (projectMenu) projectMenu.removeAttribute('open');
+    });
+  }
+  if (stopAllBtn) stopAllBtn.addEventListener('click', stopAll);
+  if (toggleSequencerBtn) {
+    toggleSequencerBtn.addEventListener('click', () => {
+      setSequencerPanelOpen(!ui.seqPanelOpen);
+      queueAutosave();
+    });
+  }
+
+  if (themeSelect) {
+    themeSelect.value = ui.themeKey;
+    themeSelect.addEventListener('change', e => {
+      applyTheme(e.target.value);
+      queueAutosave();
+    });
+  }
 
   // -- Sequencer panel resize ----------------------------------
   const seqResizer = document.getElementById('seq-resizer');
@@ -97,6 +144,13 @@ window.addEventListener('DOMContentLoaded', () => {
         seqPanel.style.minWidth = '';
         return;
       }
+      // In list-only mode, keep the panel compact and avoid reapplying stored
+      // editor widths that can leave a large blank area.
+      if (!ui.seqEditorOpen || !ui.currentSeqId) {
+        seqPanel.style.width = `${SEQ_LIST_ONLY_WIDTH}px`;
+        seqPanel.style.minWidth = `${SEQ_LIST_ONLY_WIDTH}px`;
+        return;
+      }
       if (Number.isFinite(ui.seqPanelWidth)) applyPanelWidth(ui.seqPanelWidth);
     };
 
@@ -105,6 +159,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     seqResizer.addEventListener('pointerdown', e => {
       if (window.innerWidth <= 980) return;
+      if (!ui.seqEditorOpen || !ui.currentSeqId) return;
       resizeState = {
         pointerId:  e.pointerId,
         startX:     e.clientX,
@@ -141,8 +196,10 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   // -- Pad grid ------------------------------------------------
-  document.getElementById('btn-add-pad').addEventListener('click',  () => openNewPadModal());
-  document.getElementById('btn-grid-add').addEventListener('click', () => openNewPadModal());
+  const addPadBtn = document.getElementById('btn-add-pad');
+  const gridAddBtn = document.getElementById('btn-grid-add');
+  if (addPadBtn) addPadBtn.addEventListener('click',  () => openNewPadModal());
+  if (gridAddBtn) gridAddBtn.addEventListener('click', () => openNewPadModal());
 
   // -- Master volume --------------------------------------------
   const masterSlider = document.getElementById('master-volume');
@@ -166,12 +223,22 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('pad-volume').addEventListener('input',  syncPadModalDisplays);
   document.getElementById('pad-fadein').addEventListener('input',  syncPadModalDisplays);
   document.getElementById('pad-fadeout').addEventListener('input', syncPadModalDisplays);
+  document.getElementById('pad-trim-start').addEventListener('input', syncPadTrimDisplays);
+  document.getElementById('pad-trim-end').addEventListener('input', syncPadTrimDisplays);
+  document.getElementById('btn-preview-clip').addEventListener('click', previewPadModalClip);
 
   // Color picker ↔ swatches
-  document.getElementById('pad-color').addEventListener('input', e => syncSwatches(e.target.value));
+  const padColorInput = document.getElementById('pad-color');
+  const swatchesHost = document.getElementById('pad-color-swatches');
+  if (swatchesHost) {
+    swatchesHost.innerHTML = PAD_COLOR_PALETTE.map(color => (
+      `<button class="swatch" style="--sw:${color}" data-color="${color}" type="button" aria-label="Select ${color} color"></button>`
+    )).join('');
+  }
+  padColorInput.addEventListener('input', e => syncSwatches(e.target.value));
   document.querySelectorAll('.swatch').forEach(sw => {
     sw.addEventListener('click', () => {
-      document.getElementById('pad-color').value = sw.dataset.color;
+      padColorInput.value = sw.dataset.color;
       syncSwatches(sw.dataset.color);
     });
   });

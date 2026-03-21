@@ -39,6 +39,7 @@ export function saveAutosave() {
       seqPanelOpen:  !!ui.seqPanelOpen,
       seqEditorOpen: !!ui.seqEditorOpen,
       seqPanelWidth: Number.isFinite(ui.seqPanelWidth) ? ui.seqPanelWidth : null,
+      themeKey: typeof ui.themeKey === 'string' ? ui.themeKey : 'lsu-night',
     },
     savedAt: Date.now(),
   };
@@ -65,6 +66,7 @@ export function loadAutosave() {
     ui.seqPanelOpen  = typeof savedUi.seqPanelOpen  === 'boolean' ? savedUi.seqPanelOpen  : true;
     ui.seqEditorOpen = typeof savedUi.seqEditorOpen === 'boolean' ? savedUi.seqEditorOpen : false;
     ui.seqPanelWidth = Number.isFinite(savedUi.seqPanelWidth)     ? savedUi.seqPanelWidth : null;
+    ui.themeKey      = typeof savedUi.themeKey === 'string' ? savedUi.themeKey : 'lsu-night';
   } catch (e) {
     console.warn('Autosave restore failed:', e);
   }

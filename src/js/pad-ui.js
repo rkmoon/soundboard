@@ -16,7 +16,7 @@ import {
   escHtml, sliderToVol, sliderToSec,
   formatDurationClock,
 } from './state.js';
-import { playPad, hydratePadDuration } from './audio.js';
+import { playPad, hydratePadDuration, getPadClipBounds } from './audio.js';
 import { insertPadIntoSequence } from './seq-ui.js';
 import { openPadModal } from './modals.js';
 import { queueAutosave } from './persistence.js';
@@ -224,7 +224,9 @@ function applyPadDrop(sourceId, dropTarget) {
 export function updatePadDurationInCard(padId) {
   const el = document.querySelector(`.pad-card[data-pad-id="${padId}"] .pad-play-duration`);
   if (!el) return;
-  const sec = rt.padDurSec[padId];
+  const pad = getPad(padId);
+  const totalSec = rt.padDurSec[padId];
+  const sec = pad && Number.isFinite(totalSec) ? getPadClipBounds(pad, totalSec).playSec : totalSec;
   const txt = formatDurationClock(sec);
   el.textContent = txt || '\u00A0';
 }
@@ -285,7 +287,7 @@ export function buildPadCard(pad) {
       <div class="pad-progress"></div>
       <span class="pad-play-text">
         <span class="pad-play-name">${escHtml(pad.label)}</span>
-        <span class="pad-play-duration">${formatDurationClock(rt.padDurSec[pad.id]) || '&nbsp;'}</span>
+        <span class="pad-play-duration">${formatDurationClock(Number.isFinite(rt.padDurSec[pad.id]) ? getPadClipBounds(pad, rt.padDurSec[pad.id]).playSec : rt.padDurSec[pad.id]) || '&nbsp;'}</span>
       </span>
     </div>
     <div class="pad-toggle-row">

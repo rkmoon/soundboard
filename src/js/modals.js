@@ -9,10 +9,83 @@ import {
   sliderToVol, sliderToSec,
   formatSec, dialogOpen,
 } from './state.js';
-import { getPadDurationSec, invalidateHowl, ensureHowl } from './audio.js';
+import { getPadDurationSec, invalidateHowl, ensureHowl, getPadClipBounds } from './audio.js';
 import { renderPadGrid, buildPadCard } from './pad-ui.js';
 import { renderSeqList, renderSeqOverview, renderSeqSteps } from './seq-ui.js';
 import { queueAutosave } from './persistence.js';
+
+const PAD_DURATION_PROBE_ID = '__pad_duration_probe__';
+const PAD_MODAL_PREVIEW_ID = '__pad_modal_preview__';
+let modalAudioDurationSec = null;
+let modalPreviewTimers = [];
+
+function setPadPreviewStatus(text) {
+  const el = document.getElementById('pad-preview-status');
+  if (el) el.textContent = text;
+}
+
+function clearPadModalPreviewTimers() {
+  modalPreviewTimers.forEach(t => clearTimeout(t));
+  modalPreviewTimers = [];
+}
+
+function clampModalTrimValues() {
+  const trimStartInput = document.getElementById('pad-trim-start');
+  const trimEndInput = document.getElementById('pad-trim-end');
+  if (!trimStartInput || !trimEndInput) return { trimStart: 0, trimEnd: 0 };
+
+  let trimStart = Math.max(0, Number(trimStartInput.value) || 0);
+  let trimEnd = Math.max(0, Number(trimEndInput.value) || 0);
+
+  if (Number.isFinite(modalAudioDurationSec) && modalAudioDurationSec > 0) {
+    const minPlayableSec = Math.min(0.05, modalAudioDurationSec);
+    const maxTotalTrim = Math.max(0, modalAudioDurationSec - minPlayableSec);
+    const sum = trimStart + trimEnd;
+    if (sum > maxTotalTrim) {
+      const overflow = sum - maxTotalTrim;
+      if (trimEnd >= overflow) {
+        trimEnd -= overflow;
+      } else {
+        trimStart = Math.max(0, trimStart - (overflow - trimEnd));
+        trimEnd = 0;
+      }
+    }
+    trimStart = Math.min(trimStart, modalAudioDurationSec);
+    trimEnd = Math.min(trimEnd, modalAudioDurationSec);
+  }
+
+  trimStart = Math.round(trimStart * 10) / 10;
+  trimEnd = Math.round(trimEnd * 10) / 10;
+  trimStartInput.value = String(trimStart);
+  trimEndInput.value = String(trimEnd);
+  return { trimStart, trimEnd };
+}
+
+export function syncPadTrimDisplays() {
+  const clipEl = document.getElementById('pad-clip-duration-display');
+  if (!clipEl) return;
+
+  const { trimStart, trimEnd } = clampModalTrimValues();
+  if (!Number.isFinite(modalAudioDurationSec) || modalAudioDurationSec <= 0) {
+    clipEl.textContent = 'Clip Length: Unknown';
+    return;
+  }
+
+  const clip = getPadClipBounds({ trimStart, trimEnd }, modalAudioDurationSec);
+  clipEl.textContent = 'Clip Length: ' + formatSec(clip.playSec);
+}
+
+export function stopPadModalPreview() {
+  clearPadModalPreviewTimers();
+  const howl = rt.howls[PAD_MODAL_PREVIEW_ID];
+  if (howl) {
+    howl.stop();
+    howl.unload();
+    delete rt.howls[PAD_MODAL_PREVIEW_ID];
+  }
+  delete rt.padDurSec[PAD_MODAL_PREVIEW_ID];
+  setPadPreviewStatus('Not playing');
+}
 
 // ── Pad modal ─────────────────────────────────────────────────
 
@@ -28,12 +101,16 @@ export function openPadModal(padId) {
   document.getElementById('pad-volume').value   = Math.round(pad.volume * 100);
   document.getElementById('pad-fadein').value   = Math.round(pad.fadeIn * 10);
   document.getElementById('pad-fadeout').value  = Math.round(pad.fadeOut * 10);
+  document.getElementById('pad-trim-start').value = (Number(pad.trimStart) || 0).toFixed(1);
+  document.getElementById('pad-trim-end').value = (Number(pad.trimEnd) || 0).toFixed(1);
   document.getElementById('pad-loop').checked   = pad.loop;
   document.getElementById('pad-retrigger').checked = !!pad.retrigger;
   document.getElementById('pad-modal-delete').style.display = '';
+  setPadPreviewStatus('Not playing');
 
   syncPadModalDisplays();
   updatePadDurationDisplay(pad.filePath, pad.label);
+  syncPadTrimDisplays();
   syncSwatches(pad.color);
   document.getElementById('pad-modal').hidden = false;
 }
@@ -47,17 +124,23 @@ export function openNewPadModal(filePath = '', label = '') {
   document.getElementById('pad-volume').value   = 80;
   document.getElementById('pad-fadein').value   = 0;
   document.getElementById('pad-fadeout').value  = 0;
+  document.getElementById('pad-trim-start').value = '0.0';
+  document.getElementById('pad-trim-end').value = '0.0';
   document.getElementById('pad-loop').checked   = false;
   document.getElementById('pad-retrigger').checked = false;
   document.getElementById('pad-modal-delete').style.display = 'none';
+  setPadPreviewStatus('Not playing');
 
   syncPadModalDisplays();
   updatePadDurationDisplay(filePath, label);
+  syncPadTrimDisplays();
   syncSwatches(document.getElementById('pad-color').value);
   document.getElementById('pad-modal').hidden = false;
 }
 
 export function closePadModal() {
+  stopPadModalPreview();
+  modalAudioDurationSec = null;
   document.getElementById('pad-modal').hidden = true;
   ui.editingPadId = null;
 }
@@ -75,18 +158,23 @@ export async function updatePadDurationDisplay(filePath, labelHint = '') {
   const durationEl = document.getElementById('pad-duration-display');
   if (!durationEl) return;
   if (!filePath) {
+    modalAudioDurationSec = null;
     durationEl.textContent = 'Length: Unknown';
+    syncPadTrimDisplays();
     return;
   }
 
   durationEl.textContent = 'Length: Loading...';
-  const tempPad = makePad({ id: '__preview__', filePath, label: labelHint || 'Preview' });
+  const tempPad = makePad({ id: PAD_DURATION_PROBE_ID, filePath, label: labelHint || 'Preview' });
   const dur     = await getPadDurationSec(tempPad);
+  modalAudioDurationSec = dur;
   durationEl.textContent = 'Length: ' + formatSec(dur);
-  if (rt.howls[tempPad.id]) {
-    rt.howls[tempPad.id].unload();
-    delete rt.howls[tempPad.id];
+  if (rt.howls[PAD_DURATION_PROBE_ID]) {
+    rt.howls[PAD_DURATION_PROBE_ID].unload();
+    delete rt.howls[PAD_DURATION_PROBE_ID];
   }
+  delete rt.padDurSec[PAD_DURATION_PROBE_ID];
+  syncPadTrimDisplays();
 }
 
 export function syncSwatches(hexColor) {
@@ -96,14 +184,81 @@ export function syncSwatches(hexColor) {
 }
 
 function getPadModalValues() {
+  const { trimStart, trimEnd } = clampModalTrimValues();
   return {
     color:     document.getElementById('pad-color').value,
     volume:    sliderToVol(+document.getElementById('pad-volume').value),
     fadeIn:    sliderToSec(+document.getElementById('pad-fadein').value),
     fadeOut:   sliderToSec(+document.getElementById('pad-fadeout').value),
+    trimStart,
+    trimEnd,
     loop:      document.getElementById('pad-loop').checked,
     retrigger: document.getElementById('pad-retrigger').checked,
   };
+}
+
+export async function previewPadModalClip() {
+  const filePath = document.getElementById('pad-filepath').value;
+  if (!filePath) {
+    setPadPreviewStatus('Select an audio file first');
+    return;
+  }
+
+  stopPadModalPreview();
+  setPadPreviewStatus('Loading preview...');
+
+  const values = getPadModalValues();
+  const previewPad = makePad({
+    id: PAD_MODAL_PREVIEW_ID,
+    label: 'Preview',
+    filePath,
+    loop: false,
+    ...values,
+  });
+
+  const howl = await ensureHowl(previewPad);
+  if (!howl) {
+    setPadPreviewStatus('Preview failed to load');
+    return;
+  }
+
+  const totalDur = howl.duration();
+  if (Number.isFinite(totalDur) && totalDur > 0) {
+    modalAudioDurationSec = totalDur;
+    syncPadTrimDisplays();
+  }
+
+  const clip = getPadClipBounds(previewPad, totalDur);
+  if (!clip.playSec) {
+    setPadPreviewStatus('Invalid clip length');
+    return;
+  }
+
+  const soundId = howl.play();
+  howl.loop(false, soundId);
+  howl.volume(previewPad.fadeIn > 0 ? 0 : previewPad.volume, soundId);
+  if (clip.startSec > 0) {
+    howl.seek(clip.startSec, soundId);
+  }
+  if (previewPad.fadeIn > 0) {
+    howl.fade(0, previewPad.volume, previewPad.fadeIn * 1000, soundId);
+  }
+
+  if (previewPad.fadeOut > 0 && clip.playSec > previewPad.fadeOut) {
+    const fadeTimer = setTimeout(() => {
+      if (howl.playing(soundId)) {
+        howl.fade(previewPad.volume, 0, previewPad.fadeOut * 1000, soundId);
+      }
+    }, (clip.playSec - previewPad.fadeOut) * 1000);
+    modalPreviewTimers.push(fadeTimer);
+  }
+
+  const stopTimer = setTimeout(() => {
+    if (howl.playing(soundId)) howl.stop(soundId);
+    setPadPreviewStatus('Preview finished');
+  }, clip.playSec * 1000);
+  modalPreviewTimers.push(stopTimer);
+  setPadPreviewStatus(`Playing preview (${formatSec(clip.playSec)})`);
 }
 
 export function addPadsFromFiles(filePaths) {
@@ -123,7 +278,7 @@ export function addPadsFromFiles(filePaths) {
 export function savePadModal() {
   const label    = document.getElementById('pad-label').value.trim() || 'New Sound';
   const filePath = document.getElementById('pad-filepath').value;
-  const { color, volume, fadeIn, fadeOut, loop, retrigger } = getPadModalValues();
+  const { color, volume, fadeIn, fadeOut, trimStart, trimEnd, loop, retrigger } = getPadModalValues();
 
   if (ui.editingPadId) {
     const pad    = getPad(ui.editingPadId);
@@ -134,6 +289,8 @@ export function savePadModal() {
     pad.volume    = volume;
     pad.fadeIn    = fadeIn;
     pad.fadeOut   = fadeOut;
+    pad.trimStart = trimStart;
+    pad.trimEnd   = trimEnd;
     pad.loop      = loop;
     pad.retrigger = retrigger;
     if (reload) invalidateHowl(pad.id);
@@ -143,7 +300,7 @@ export function savePadModal() {
       oldCard.parentNode.replaceChild(newCard, oldCard);
     }
   } else {
-    const pad    = makePad({ label, color, filePath, volume, fadeIn, fadeOut, loop, retrigger });
+    const pad    = makePad({ label, color, filePath, volume, fadeIn, fadeOut, trimStart, trimEnd, loop, retrigger });
     data.pads.push(pad);
     const grid   = document.getElementById('pad-grid');
     const addBtn = document.getElementById('btn-grid-add');

@@ -45,6 +45,7 @@ export const ui = {
   seqPanelOpen:  true,
   seqEditorOpen: false,
   seqPanelWidth: null,
+  themeKey:      'lsu-night',
 };
 
 // ── Data helpers ──────────────────────────────────────────────
@@ -61,6 +62,8 @@ export function makePad(overrides = {}) {
     volume:    0.8,
     fadeIn:    0,
     fadeOut:   0,
+    trimStart: 0,
+    trimEnd:   0,
     loop:      false,
     retrigger: false,
     ...overrides,
@@ -84,6 +87,8 @@ export function makeStep(overrides = {}) {
 // ── Normalisation (applied when loading saved data) ───────────
 export function normalizePad(pad) {
   if (typeof pad.retrigger !== 'boolean') pad.retrigger = false;
+  if (!Number.isFinite(pad.trimStart) || pad.trimStart < 0) pad.trimStart = 0;
+  if (!Number.isFinite(pad.trimEnd) || pad.trimEnd < 0) pad.trimEnd = 0;
   delete pad.defaultCrossfade;
   delete pad.playDuration;
 }
@@ -150,10 +155,52 @@ export function escHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// ── Color cycling ─────────────────────────────────────────────
-const COLORS = ['#ef4444','#f97316','#eab308','#22c55e','#3b82f6','#8b5cf6','#ec4899','#14b8a6','#f59e0b','#64748b'];
+function clampNumber(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+export function getPadClipBounds(pad, totalDurationSec) {
+  if (!Number.isFinite(totalDurationSec) || totalDurationSec <= 0) {
+    return { startSec: 0, endSec: 0, playSec: 0 };
+  }
+
+  const minPlayableSec = Math.min(0.05, totalDurationSec);
+  let startSec = clampNumber(Number(pad?.trimStart) || 0, 0, totalDurationSec);
+  let endTrimSec = clampNumber(Number(pad?.trimEnd) || 0, 0, totalDurationSec);
+  let endSec = totalDurationSec - endTrimSec;
+
+  if (endSec - startSec < minPlayableSec) {
+    if (startSec > totalDurationSec - minPlayableSec) {
+      startSec = Math.max(0, totalDurationSec - minPlayableSec);
+      endSec = totalDurationSec;
+    } else {
+      endSec = startSec + minPlayableSec;
+    }
+  }
+
+  return {
+    startSec,
+    endSec,
+    playSec: Math.max(minPlayableSec, endSec - startSec),
+  };
+}
+
+export function getPadPlaybackDurationSec(pad, totalDurationSec) {
+  return getPadClipBounds(pad, totalDurationSec).playSec;
+}
+
+// ── Color cycling (30 proven, high-contrast defaults) ────────
+// Palette derived from widely used Tailwind/Material-like hues for
+// distinct category-style colors that remain readable on dark surfaces.
+export const PAD_COLOR_PALETTE = [
+  '#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16', '#22c55e',
+  '#10b981', '#14b8a6', '#06b6d4', '#0ea5e9', '#3b82f6', '#6366f1',
+  '#8b5cf6', '#a855f7', '#d946ef', '#ec4899', '#f43f5e', '#fb7185',
+  '#f87171', '#fb923c', '#facc15', '#a3e635', '#4ade80', '#2dd4bf',
+  '#22d3ee', '#38bdf8', '#60a5fa', '#818cf8', '#c084fc', '#f472b6',
+];
 let _colorIdx = 0;
-export function randomColor() { return COLORS[_colorIdx++ % COLORS.length]; }
+export function randomColor() { return PAD_COLOR_PALETTE[_colorIdx++ % PAD_COLOR_PALETTE.length]; }
 
 // ── Utility ───────────────────────────────────────────────────
 export function uuid() { return crypto.randomUUID(); }
