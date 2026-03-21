@@ -72,9 +72,12 @@ export function setSequencerPanelOpen(open) {
 }
 
 export function setSequenceEditorOpen(open) {
+  const panel = document.getElementById('sequencer-panel');
+  // Capture the live editor width before any class toggles can reflow layout.
+  const widthBeforeToggle = panel ? panel.getBoundingClientRect().width : NaN;
+
   ui.seqEditorOpen = !!open;
   const editor    = document.getElementById('seq-editor');
-  const panel     = document.getElementById('sequencer-panel');
   const workspace = document.getElementById('app-workspace');
   const hasEditor = !!ui.seqEditorOpen && !!ui.currentSeqId;
 
@@ -85,16 +88,21 @@ export function setSequenceEditorOpen(open) {
       panel.style.width    = '';
       panel.style.minWidth = '';
     } else if (hasEditor) {
-      const expanded  = Number.isFinite(ui.seqPanelWidth) ? ui.seqPanelWidth : panel.getBoundingClientRect().width;
+      const hasSavedWidth = Number.isFinite(ui.seqPanelWidth);
+      const expanded  = hasSavedWidth ? ui.seqPanelWidth : panel.getBoundingClientRect().width;
       const { minWidth, maxWidth } = getSequencerEditorWidthBounds();
-      const bounded   = resolvePanelWidthForRowVisibility(panel, Math.round(expanded), { minWidth, maxWidth });
+      let bounded = Math.max(minWidth, Math.min(maxWidth, Math.round(expanded)));
+      // Only auto-expand for overflow the first time when no saved width exists.
+      // If the user has manually resized, preserve that width when re-opening editor.
+      if (!hasSavedWidth) {
+        bounded = resolvePanelWidthForRowVisibility(panel, bounded, { minWidth, maxWidth });
+      }
       ui.seqPanelWidth         = bounded;
       panel.style.width        = `${bounded}px`;
       panel.style.minWidth     = `${bounded}px`;
     } else {
-      const current = panel.getBoundingClientRect().width;
-      if (Number.isFinite(current) && current > SEQ_LIST_ONLY_WIDTH + 20) {
-        ui.seqPanelWidth = Math.round(current);
+      if (Number.isFinite(widthBeforeToggle) && widthBeforeToggle > SEQ_LIST_ONLY_WIDTH + 20) {
+        ui.seqPanelWidth = Math.round(widthBeforeToggle);
       }
       panel.style.width    = `${SEQ_LIST_ONLY_WIDTH}px`;
       panel.style.minWidth = `${SEQ_LIST_ONLY_WIDTH}px`;
