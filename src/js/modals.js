@@ -343,6 +343,7 @@ export function openPadModal(padId) {
   document.getElementById('pad-volume').value   = Math.round(pad.volume * 100);
   document.getElementById('pad-fadein').value   = Math.round(pad.fadeIn * 10);
   document.getElementById('pad-fadeout').value  = Math.round(pad.fadeOut * 10);
+  document.getElementById('pad-playback-speed').value = Number.isFinite(pad.playbackSpeed) ? pad.playbackSpeed : 1.0;
   document.getElementById('pad-trim-start').value = (Number(pad.trimStart) || 0).toFixed(1);
   document.getElementById('pad-trim-end').value = (Number(pad.trimEnd) || 0).toFixed(1);
   document.getElementById('pad-loop').checked   = pad.loop;
@@ -357,6 +358,7 @@ export function openPadModal(padId) {
   syncPadModalDisplays();
   updatePadDurationDisplay(pad.filePath, pad.label);
   syncPadTrimDisplays();
+  syncPadPlaybackSpeedDisplay();
   ensureModalWaveform(pad.filePath);
   syncSwatches(pad.color);
   document.getElementById('pad-modal').hidden = false;
@@ -371,6 +373,7 @@ export function openNewPadModal(filePath = '', label = '') {
   document.getElementById('pad-volume').value   = 80;
   document.getElementById('pad-fadein').value   = 0;
   document.getElementById('pad-fadeout').value  = 0;
+  document.getElementById('pad-playback-speed').value = 1.0;
   document.getElementById('pad-trim-start').value = '0.0';
   document.getElementById('pad-trim-end').value = '0.0';
   document.getElementById('pad-loop').checked   = false;
@@ -385,6 +388,7 @@ export function openNewPadModal(filePath = '', label = '') {
   syncPadModalDisplays();
   updatePadDurationDisplay(filePath, label);
   syncPadTrimDisplays();
+  syncPadPlaybackSpeedDisplay();
   ensureModalWaveform(filePath);
   syncSwatches(document.getElementById('pad-color').value);
   document.getElementById('pad-modal').hidden = false;
@@ -454,6 +458,7 @@ function getPadModalValues() {
     volume:    sliderToVol(+document.getElementById('pad-volume').value),
     fadeIn:    sliderToSec(+document.getElementById('pad-fadein').value),
     fadeOut:   sliderToSec(+document.getElementById('pad-fadeout').value),
+    playbackSpeed: Math.max(0.5, Math.min(4.0, +document.getElementById('pad-playback-speed').value)),
     trimStart,
     trimEnd,
     gainDb:    modalGainDb,
@@ -545,7 +550,7 @@ export function addPadsFromFiles(filePaths) {
 export function savePadModal() {
   const label    = document.getElementById('pad-label').value.trim() || 'New Sound';
   const filePath = document.getElementById('pad-filepath').value;
-  const { color, volume, fadeIn, fadeOut, trimStart, trimEnd, gainDb, loudnessLufs, loop, retrigger } = getPadModalValues();
+  const { color, volume, fadeIn, fadeOut, playbackSpeed, trimStart, trimEnd, gainDb, loudnessLufs, loop, retrigger } = getPadModalValues();
 
   if (ui.editingPadId) {
     const pad    = getPad(ui.editingPadId);
@@ -556,6 +561,7 @@ export function savePadModal() {
     pad.volume    = volume;
     pad.fadeIn    = fadeIn;
     pad.fadeOut   = fadeOut;
+    pad.playbackSpeed = playbackSpeed;
     pad.trimStart = trimStart;
     pad.trimEnd   = trimEnd;
     pad.gainDb    = gainDb;
@@ -569,7 +575,7 @@ export function savePadModal() {
       oldCard.parentNode.replaceChild(newCard, oldCard);
     }
   } else {
-    const pad    = makePad({ label, color, filePath, volume, fadeIn, fadeOut, trimStart, trimEnd, gainDb, loudnessLufs, loop, retrigger });
+    const pad    = makePad({ label, color, filePath, volume, fadeIn, fadeOut, playbackSpeed, trimStart, trimEnd, gainDb, loudnessLufs, loop, retrigger });
     data.pads.push(pad);
     const grid   = document.getElementById('pad-grid');
     const addBtn = document.getElementById('btn-grid-add');
@@ -689,5 +695,25 @@ export async function browseAudioFiles() {
   if (!cur || cur === 'New Sound') {
     const name = basename(selected).replace(/\.[^.]+$/, '');
     document.getElementById('pad-label').value = name;
+  }
+}
+
+// ── Pad playback speed sync ───────────────────────────────────
+
+export function syncPadPlaybackSpeedDisplay() {
+  const pad = getPad(ui.editingPadId);
+  if (!pad) return;
+  const slider = document.getElementById('pad-playback-speed');
+  const display = document.getElementById('pad-speed-display');
+  if (slider) slider.value = Number.isFinite(pad.playbackSpeed) ? pad.playbackSpeed : 1.0;
+  if (display) display.textContent = (Number.isFinite(pad.playbackSpeed) ? pad.playbackSpeed : 1.0).toFixed(1) + '×';
+}
+
+export function onPadPlaybackSpeedChange() {
+  const slider = document.getElementById('pad-playback-speed');
+  const display = document.getElementById('pad-speed-display');
+  if (slider && display) {
+    const speed = parseFloat(slider.value);
+    display.textContent = speed.toFixed(1) + '×';
   }
 }
