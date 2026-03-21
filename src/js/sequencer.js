@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { rt, getSeq, getPad, getEffectiveStepCrossfade } from './state.js';
-import { ensureHowl, stopPad, clearPadActive, getPadClipBounds } from './audio.js';
+import { ensureHowl, stopPad, clearPadActive, getPadClipBounds, getEffectivePadVolume } from './audio.js';
 import {
   updateSeqStepHighlight,
   updateSeqTransportUI,
@@ -64,8 +64,9 @@ export async function advanceSequencer(stepIdx, crossfadeInMs) {
 
   Howler.volume(rt.master);  // eslint-disable-line no-undef
 
+  const targetVol = getEffectivePadVolume(pad);
   const fadeInMs = Math.max(crossfadeInMs, pad.fadeIn * 1000);
-  howl.volume(fadeInMs > 0 ? 0 : pad.volume);
+  howl.volume(fadeInMs > 0 ? 0 : targetVol);
   const soundId = howl.play();
   howl.loop(pad.loop, soundId);
 
@@ -76,7 +77,7 @@ export async function advanceSequencer(stepIdx, crossfadeInMs) {
   }
 
   if (fadeInMs > 0) {
-    howl.fade(0, pad.volume, fadeInMs, soundId);
+    howl.fade(0, targetVol, fadeInMs, soundId);
   }
 
   const naturalDur  = clip.playSec;
@@ -96,7 +97,7 @@ export async function advanceSequencer(stepIdx, crossfadeInMs) {
       const foAt = (stepDurSec - pad.fadeOut) * 1000;
       rt.seqTimers.push(setTimeout(() => {
         if (howl.playing(soundId))
-          howl.fade(pad.volume, 0, pad.fadeOut * 1000, soundId);
+          howl.fade(targetVol, 0, pad.fadeOut * 1000, soundId);
       }, foAt));
     }
 

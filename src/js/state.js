@@ -64,6 +64,8 @@ export function makePad(overrides = {}) {
     fadeOut:   0,
     trimStart: 0,
     trimEnd:   0,
+    gainDb:    0,
+    loudnessLufs: null,
     loop:      false,
     retrigger: false,
     ...overrides,
@@ -89,6 +91,8 @@ export function normalizePad(pad) {
   if (typeof pad.retrigger !== 'boolean') pad.retrigger = false;
   if (!Number.isFinite(pad.trimStart) || pad.trimStart < 0) pad.trimStart = 0;
   if (!Number.isFinite(pad.trimEnd) || pad.trimEnd < 0) pad.trimEnd = 0;
+  if (!Number.isFinite(pad.gainDb)) pad.gainDb = 0;
+  if (!Number.isFinite(pad.loudnessLufs)) pad.loudnessLufs = null;
   delete pad.defaultCrossfade;
   delete pad.playDuration;
 }

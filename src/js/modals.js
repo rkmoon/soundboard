@@ -7,9 +7,9 @@ import {
   getPad, makePad, makeStep, getSeq,
   randomColor, basename,
   sliderToVol, sliderToSec,
-  formatSec, dialogOpen,
+  formatSec, dialogOpen, invoke,
 } from './state.js';
-import { getPadDurationSec, invalidateHowl, ensureHowl, getPadClipBounds } from './audio.js';
+import { getPadDurationSec, invalidateHowl, ensureHowl, getPadClipBounds, getEffectivePadVolume } from './audio.js';
 import { renderPadGrid, buildPadCard } from './pad-ui.js';
 import { renderSeqList, renderSeqOverview, renderSeqSteps } from './seq-ui.js';
 import { queueAutosave } from './persistence.js';
@@ -18,6 +18,14 @@ const PAD_DURATION_PROBE_ID = '__pad_duration_probe__';
 const PAD_MODAL_PREVIEW_ID = '__pad_modal_preview__';
 let modalAudioDurationSec = null;
 let modalPreviewTimers = [];
+let modalWaveformBuffer = null;
+let modalWaveformPath = '';
+let modalWaveformPeaks = [];
+let waveformDragMode = null;
+let modalGainDb = 0;
+let modalLoudnessLufs = null;
+
+const waveformAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
 function setPadPreviewStatus(text) {
   const el = document.getElementById('pad-preview-status');
@@ -27,6 +35,239 @@ function setPadPreviewStatus(text) {
 function clearPadModalPreviewTimers() {
   modalPreviewTimers.forEach(t => clearTimeout(t));
   modalPreviewTimers = [];
+}
+
+function setPadLoudnessDisplay(text) {
+  const el = document.getElementById('pad-loudness-display');
+  if (el) el.textContent = text;
+}
+
+function estimateIntegratedLufs(buffer, startSec = 0, endSec = null) {
+  if (!buffer) return null;
+  const sr = buffer.sampleRate;
+  const start = Math.max(0, Math.floor(startSec * sr));
+  const end = Math.min(buffer.length, Math.floor((endSec ?? buffer.duration) * sr));
+  const total = Math.max(0, end - start);
+  if (!total) return null;
+
+  let sumSq = 0;
+  const channels = buffer.numberOfChannels;
+  for (let c = 0; c < channels; c += 1) {
+    const ch = buffer.getChannelData(c);
+    for (let i = start; i < end; i += 1) {
+      const sample = ch[i];
+      sumSq += sample * sample;
+    }
+  }
+
+  const meanSq = sumSq / (total * channels);
+  if (!Number.isFinite(meanSq) || meanSq <= 0) return null;
+  return -0.691 + 10 * Math.log10(meanSq);
+}
+
+async function decodeAudioBufferFromPath(filePath) {
+  const dataUrl = await invoke('read_audio_dataurl', { path: filePath });
+  const response = await fetch(dataUrl);
+  const arrayBuffer = await response.arrayBuffer();
+  return await waveformAudioCtx.decodeAudioData(arrayBuffer.slice(0));
+}
+
+function computeWaveformPeaks(buffer, bins = 240) {
+  if (!buffer) return [];
+  const channels = buffer.numberOfChannels;
+  const length = buffer.length;
+  const binSize = Math.max(1, Math.floor(length / bins));
+  const peaks = new Array(bins).fill(0);
+
+  for (let b = 0; b < bins; b += 1) {
+    const from = b * binSize;
+    const to = Math.min(length, from + binSize);
+    let peak = 0;
+    for (let c = 0; c < channels; c += 1) {
+      const ch = buffer.getChannelData(c);
+      for (let i = from; i < to; i += 1) {
+        const v = Math.abs(ch[i]);
+        if (v > peak) peak = v;
+      }
+    }
+    peaks[b] = peak;
+  }
+  return peaks;
+}
+
+function getTrimTimesFromInputs() {
+  return {
+    trimStart: Math.max(0, Number(document.getElementById('pad-trim-start')?.value) || 0),
+    trimEnd: Math.max(0, Number(document.getElementById('pad-trim-end')?.value) || 0),
+  };
+}
+
+function renderPadWaveform() {
+  const canvas = document.getElementById('pad-waveform');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = Math.max(280, Math.floor(canvas.clientWidth || 720));
+  const cssHeight = Math.max(80, Math.floor(canvas.clientHeight || 120));
+  canvas.width = Math.floor(cssWidth * dpr);
+  canvas.height = Math.floor(cssHeight * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  ctx.fillRect(0, 0, cssWidth, cssHeight);
+
+  if (!modalWaveformPeaks.length || !Number.isFinite(modalAudioDurationSec) || modalAudioDurationSec <= 0) {
+    ctx.fillStyle = 'rgba(180, 180, 200, 0.8)';
+    ctx.font = '12px Segoe UI';
+    ctx.fillText('Select an audio file to view waveform', 12, cssHeight / 2);
+    return;
+  }
+
+  const midY = cssHeight / 2;
+  const width = cssWidth;
+  const height = cssHeight;
+  const barW = width / modalWaveformPeaks.length;
+
+  const { trimStart, trimEnd } = clampModalTrimValues();
+  const clip = getPadClipBounds({ trimStart, trimEnd }, modalAudioDurationSec);
+  const startX = (clip.startSec / modalAudioDurationSec) * width;
+  const endX = (clip.endSec / modalAudioDurationSec) * width;
+
+  ctx.fillStyle = 'rgba(8, 10, 18, 0.52)';
+  ctx.fillRect(0, 0, startX, height);
+  ctx.fillRect(endX, 0, width - endX, height);
+
+  ctx.fillStyle = '#8fa0c4';
+  for (let i = 0; i < modalWaveformPeaks.length; i += 1) {
+    const peak = modalWaveformPeaks[i];
+    const barH = Math.max(1, peak * (height * 0.45));
+    const x = i * barW;
+    ctx.fillRect(x, midY - barH, Math.max(1, barW - 0.6), barH * 2);
+  }
+
+  ctx.strokeStyle = '#fdd023';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(startX, 2, Math.max(2, endX - startX), height - 4);
+
+  ctx.fillStyle = '#fdd023';
+  ctx.fillRect(startX - 2, 0, 4, height);
+  ctx.fillRect(endX - 2, 0, 4, height);
+}
+
+async function ensureModalWaveform(filePath) {
+  if (!filePath) {
+    modalWaveformBuffer = null;
+    modalWaveformPath = '';
+    modalWaveformPeaks = [];
+    renderPadWaveform();
+    return;
+  }
+
+  if (modalWaveformBuffer && modalWaveformPath === filePath) {
+    renderPadWaveform();
+    return;
+  }
+
+  try {
+    const buffer = await decodeAudioBufferFromPath(filePath);
+    modalWaveformBuffer = buffer;
+    modalWaveformPath = filePath;
+    modalAudioDurationSec = buffer.duration;
+    modalWaveformPeaks = computeWaveformPeaks(buffer, 280);
+    renderPadWaveform();
+  } catch (error) {
+    console.error('Failed waveform decode:', error);
+    modalWaveformBuffer = null;
+    modalWaveformPath = '';
+    modalWaveformPeaks = [];
+    renderPadWaveform();
+  }
+}
+
+function setTrimFromWaveformX(clientX, mode) {
+  if (!Number.isFinite(modalAudioDurationSec) || modalAudioDurationSec <= 0) return;
+  const canvas = document.getElementById('pad-waveform');
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  const timeSec = Math.round((ratio * modalAudioDurationSec) * 10) / 10;
+
+  const startInput = document.getElementById('pad-trim-start');
+  const endInput = document.getElementById('pad-trim-end');
+  if (!startInput || !endInput) return;
+
+  if (mode === 'start') {
+    startInput.value = String(timeSec);
+  } else {
+    endInput.value = String(Math.max(0, Math.round((modalAudioDurationSec - timeSec) * 10) / 10));
+  }
+
+  syncPadTrimDisplays();
+  renderPadWaveform();
+}
+
+export function onPadWaveformPointerDown(event) {
+  const canvas = document.getElementById('pad-waveform');
+  if (!canvas || !Number.isFinite(modalAudioDurationSec) || modalAudioDurationSec <= 0) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const { trimStart, trimEnd } = getTrimTimesFromInputs();
+  const clip = getPadClipBounds({ trimStart, trimEnd }, modalAudioDurationSec);
+  const startX = rect.left + (clip.startSec / modalAudioDurationSec) * rect.width;
+  const endX = rect.left + (clip.endSec / modalAudioDurationSec) * rect.width;
+  const distStart = Math.abs(event.clientX - startX);
+  const distEnd = Math.abs(event.clientX - endX);
+
+  waveformDragMode = distStart <= distEnd ? 'start' : 'end';
+  setTrimFromWaveformX(event.clientX, waveformDragMode);
+  try { canvas.setPointerCapture(event.pointerId); } catch (_) { /* ignore */ }
+}
+
+export function onPadWaveformPointerMove(event) {
+  if (!waveformDragMode) return;
+  setTrimFromWaveformX(event.clientX, waveformDragMode);
+}
+
+export function onPadWaveformPointerUp(event) {
+  const canvas = document.getElementById('pad-waveform');
+  if (canvas) {
+    try { canvas.releasePointerCapture(event.pointerId); } catch (_) { /* ignore */ }
+  }
+  waveformDragMode = null;
+}
+
+export async function matchPadModalLoudness() {
+  const filePath = document.getElementById('pad-filepath')?.value || '';
+  if (!filePath) {
+    setPadLoudnessDisplay('Loudness: Unknown • Gain: +0.0 dB');
+    return;
+  }
+
+  await ensureModalWaveform(filePath);
+  if (!modalWaveformBuffer) {
+    setPadLoudnessDisplay('Loudness analysis failed');
+    return;
+  }
+
+  const { trimStart, trimEnd } = clampModalTrimValues();
+  const clip = getPadClipBounds({ trimStart, trimEnd }, modalWaveformBuffer.duration);
+  const measured = estimateIntegratedLufs(modalWaveformBuffer, clip.startSec, clip.endSec);
+  if (!Number.isFinite(measured)) {
+    setPadLoudnessDisplay('Loudness: Unknown • Gain: +0.0 dB');
+    return;
+  }
+
+  const target = Number(document.getElementById('pad-target-lufs')?.value);
+  const targetLufs = Number.isFinite(target) ? target : -16;
+  const gainDb = Math.max(-24, Math.min(24, targetLufs - measured));
+
+  modalLoudnessLufs = measured;
+  modalGainDb = gainDb;
+
+  setPadLoudnessDisplay(`Loudness: ${measured.toFixed(1)} LUFS • Gain: ${gainDb >= 0 ? '+' : ''}${gainDb.toFixed(1)} dB`);
 }
 
 function clampModalTrimValues() {
@@ -73,6 +314,7 @@ export function syncPadTrimDisplays() {
 
   const clip = getPadClipBounds({ trimStart, trimEnd }, modalAudioDurationSec);
   clipEl.textContent = 'Clip Length: ' + formatSec(clip.playSec);
+  renderPadWaveform();
 }
 
 export function stopPadModalPreview() {
@@ -105,12 +347,17 @@ export function openPadModal(padId) {
   document.getElementById('pad-trim-end').value = (Number(pad.trimEnd) || 0).toFixed(1);
   document.getElementById('pad-loop').checked   = pad.loop;
   document.getElementById('pad-retrigger').checked = !!pad.retrigger;
+  document.getElementById('pad-target-lufs').value = '-16';
   document.getElementById('pad-modal-delete').style.display = '';
   setPadPreviewStatus('Not playing');
+  modalGainDb = Number.isFinite(pad.gainDb) ? pad.gainDb : 0;
+  modalLoudnessLufs = Number.isFinite(pad.loudnessLufs) ? pad.loudnessLufs : null;
+  setPadLoudnessDisplay(`Loudness: ${Number.isFinite(pad.loudnessLufs) ? pad.loudnessLufs.toFixed(1) + ' LUFS' : 'Unknown'} • Gain: ${(pad.gainDb || 0) >= 0 ? '+' : ''}${(pad.gainDb || 0).toFixed(1)} dB`);
 
   syncPadModalDisplays();
   updatePadDurationDisplay(pad.filePath, pad.label);
   syncPadTrimDisplays();
+  ensureModalWaveform(pad.filePath);
   syncSwatches(pad.color);
   document.getElementById('pad-modal').hidden = false;
 }
@@ -128,12 +375,17 @@ export function openNewPadModal(filePath = '', label = '') {
   document.getElementById('pad-trim-end').value = '0.0';
   document.getElementById('pad-loop').checked   = false;
   document.getElementById('pad-retrigger').checked = false;
+  document.getElementById('pad-target-lufs').value = '-16';
   document.getElementById('pad-modal-delete').style.display = 'none';
   setPadPreviewStatus('Not playing');
+  modalGainDb = 0;
+  modalLoudnessLufs = null;
+  setPadLoudnessDisplay('Loudness: Unknown • Gain: +0.0 dB');
 
   syncPadModalDisplays();
   updatePadDurationDisplay(filePath, label);
   syncPadTrimDisplays();
+  ensureModalWaveform(filePath);
   syncSwatches(document.getElementById('pad-color').value);
   document.getElementById('pad-modal').hidden = false;
 }
@@ -141,6 +393,12 @@ export function openNewPadModal(filePath = '', label = '') {
 export function closePadModal() {
   stopPadModalPreview();
   modalAudioDurationSec = null;
+  modalWaveformBuffer = null;
+  modalWaveformPath = '';
+  modalWaveformPeaks = [];
+  waveformDragMode = null;
+  modalGainDb = 0;
+  modalLoudnessLufs = null;
   document.getElementById('pad-modal').hidden = true;
   ui.editingPadId = null;
 }
@@ -160,6 +418,11 @@ export async function updatePadDurationDisplay(filePath, labelHint = '') {
   if (!filePath) {
     modalAudioDurationSec = null;
     durationEl.textContent = 'Length: Unknown';
+    setPadLoudnessDisplay('Loudness: Unknown • Gain: +0.0 dB');
+    modalWaveformBuffer = null;
+    modalWaveformPath = '';
+    modalWaveformPeaks = [];
+    renderPadWaveform();
     syncPadTrimDisplays();
     return;
   }
@@ -175,6 +438,7 @@ export async function updatePadDurationDisplay(filePath, labelHint = '') {
   }
   delete rt.padDurSec[PAD_DURATION_PROBE_ID];
   syncPadTrimDisplays();
+  await ensureModalWaveform(filePath);
 }
 
 export function syncSwatches(hexColor) {
@@ -192,6 +456,8 @@ function getPadModalValues() {
     fadeOut:   sliderToSec(+document.getElementById('pad-fadeout').value),
     trimStart,
     trimEnd,
+    gainDb:    modalGainDb,
+    loudnessLufs: modalLoudnessLufs,
     loop:      document.getElementById('pad-loop').checked,
     retrigger: document.getElementById('pad-retrigger').checked,
   };
@@ -234,20 +500,21 @@ export async function previewPadModalClip() {
     return;
   }
 
+  const targetVol = getEffectivePadVolume(previewPad);
   const soundId = howl.play();
   howl.loop(false, soundId);
-  howl.volume(previewPad.fadeIn > 0 ? 0 : previewPad.volume, soundId);
+  howl.volume(previewPad.fadeIn > 0 ? 0 : targetVol, soundId);
   if (clip.startSec > 0) {
     howl.seek(clip.startSec, soundId);
   }
   if (previewPad.fadeIn > 0) {
-    howl.fade(0, previewPad.volume, previewPad.fadeIn * 1000, soundId);
+    howl.fade(0, targetVol, previewPad.fadeIn * 1000, soundId);
   }
 
   if (previewPad.fadeOut > 0 && clip.playSec > previewPad.fadeOut) {
     const fadeTimer = setTimeout(() => {
       if (howl.playing(soundId)) {
-        howl.fade(previewPad.volume, 0, previewPad.fadeOut * 1000, soundId);
+        howl.fade(targetVol, 0, previewPad.fadeOut * 1000, soundId);
       }
     }, (clip.playSec - previewPad.fadeOut) * 1000);
     modalPreviewTimers.push(fadeTimer);
@@ -278,7 +545,7 @@ export function addPadsFromFiles(filePaths) {
 export function savePadModal() {
   const label    = document.getElementById('pad-label').value.trim() || 'New Sound';
   const filePath = document.getElementById('pad-filepath').value;
-  const { color, volume, fadeIn, fadeOut, trimStart, trimEnd, loop, retrigger } = getPadModalValues();
+  const { color, volume, fadeIn, fadeOut, trimStart, trimEnd, gainDb, loudnessLufs, loop, retrigger } = getPadModalValues();
 
   if (ui.editingPadId) {
     const pad    = getPad(ui.editingPadId);
@@ -291,6 +558,8 @@ export function savePadModal() {
     pad.fadeOut   = fadeOut;
     pad.trimStart = trimStart;
     pad.trimEnd   = trimEnd;
+    pad.gainDb    = gainDb;
+    pad.loudnessLufs = loudnessLufs;
     pad.loop      = loop;
     pad.retrigger = retrigger;
     if (reload) invalidateHowl(pad.id);
@@ -300,7 +569,7 @@ export function savePadModal() {
       oldCard.parentNode.replaceChild(newCard, oldCard);
     }
   } else {
-    const pad    = makePad({ label, color, filePath, volume, fadeIn, fadeOut, trimStart, trimEnd, loop, retrigger });
+    const pad    = makePad({ label, color, filePath, volume, fadeIn, fadeOut, trimStart, trimEnd, gainDb, loudnessLufs, loop, retrigger });
     data.pads.push(pad);
     const grid   = document.getElementById('pad-grid');
     const addBtn = document.getElementById('btn-grid-add');
@@ -412,6 +681,9 @@ export async function browseAudioFiles() {
   }
 
   document.getElementById('pad-filepath').value = selected;
+  modalGainDb = 0;
+  modalLoudnessLufs = null;
+  setPadLoudnessDisplay('Loudness: Unknown • Gain: +0.0 dB');
   await updatePadDurationDisplay(selected);
   const cur = document.getElementById('pad-label').value.trim();
   if (!cur || cur === 'New Sound') {

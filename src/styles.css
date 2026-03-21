@@ -1085,6 +1085,15 @@ body { display: flex; flex-direction: column; }
   align-items: center;
 }
 
+.pad-waveform {
+  width: 100%;
+  height: 120px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface2) 75%, #000 25%), var(--surface2));
+  cursor: ew-resize;
+}
+
 .param-val { color: var(--accent); font-weight: 600; }
 .value-above { margin-bottom: 2px; font-size: 12px; }
 .field-help { color: var(--text-dim); font-size: 11px; }

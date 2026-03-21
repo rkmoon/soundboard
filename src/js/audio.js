@@ -11,7 +11,7 @@
 //  function bodies, not at module initialisation time.
 // ═══════════════════════════════════════════════════════════════
 
-import { rt, getPad, formatDurationClock, invoke } from './state.js';
+import { rt, getPad, invoke } from './state.js';
 import {
   updatePadDurationInCard,
   setPadLoading,
@@ -46,6 +46,13 @@ export function getPadClipBounds(pad, totalDurationSec) {
     endSec,
     playSec: Math.max(minPlayableSec, endSec - startSec),
   };
+}
+
+export function getEffectivePadVolume(pad) {
+  const base = Number.isFinite(pad?.volume) ? pad.volume : 0.8;
+  const gainDb = Number.isFinite(pad?.gainDb) ? pad.gainDb : 0;
+  const gainMul = Math.pow(10, gainDb / 20);
+  return Math.max(0, Math.min(1, base * gainMul));
 }
 
 // ── Howler management ─────────────────────────────────────────
@@ -118,6 +125,7 @@ export async function playPad(padId) {
 
   const totalDur = howl.duration();
   const clip = getPadClipBounds(pad, totalDur);
+  const targetVol = getEffectivePadVolume(pad);
   const timers = [];
   rt.active[padId] = { soundId: null, timers };
 
@@ -126,21 +134,21 @@ export async function playPad(padId) {
     rt.active[padId].soundId = soundId;
     howl.loop(false, soundId);
 
-    const startVol = (pad.fadeIn > 0 && isFirstIteration) ? 0 : pad.volume;
+    const startVol = (pad.fadeIn > 0 && isFirstIteration) ? 0 : targetVol;
     howl.volume(startVol, soundId);
     if (clip.startSec > 0) {
       howl.seek(clip.startSec, soundId);
     }
 
     if (pad.fadeIn > 0 && isFirstIteration) {
-      howl.fade(0, pad.volume, pad.fadeIn * 1000, soundId);
+      howl.fade(0, targetVol, pad.fadeIn * 1000, soundId);
     }
 
     if (pad.fadeOut > 0 && !pad.loop && clip.playSec > pad.fadeOut) {
       const delay = (clip.playSec - pad.fadeOut) * 1000;
       const fadeTimer = setTimeout(() => {
         if (rt.active[padId]?.soundId === soundId && howl.playing(soundId)) {
-          howl.fade(pad.volume, 0, pad.fadeOut * 1000, soundId);
+          howl.fade(targetVol, 0, pad.fadeOut * 1000, soundId);
         }
       }, delay);
       timers.push(fadeTimer);
