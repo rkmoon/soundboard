@@ -1,0 +1,194 @@
+// ═══════════════════════════════════════════════════════════════
+//  AUDIO — Howler management, playback, and pad duration helpers
+// ═══════════════════════════════════════════════════════════════
+//
+//  Note: Howl and Howler are globals provided by lib/howler.min.js
+//  loaded via a <script> tag in index.html.
+//
+//  Note: updatePadDurationInCard, setPadLoading, updatePadUI, and
+//  refreshPadStatus are imported from pad-ui.js. ES modules handle
+//  the circular dependency at runtime since all uses are inside
+//  function bodies, not at module initialisation time.
+// ═══════════════════════════════════════════════════════════════
+
+import { rt, getPad, formatDurationClock, invoke } from './state.js';
+import {
+  updatePadDurationInCard,
+  setPadLoading,
+  updatePadUI,
+} from './pad-ui.js';
+
+// ── Howler management ─────────────────────────────────────────
+
+export async function ensureHowl(pad) {
+  if (rt.howls[pad.id]) return rt.howls[pad.id];
+  if (!pad.filePath) return null;
+
+  setPadLoading(pad.id, true);
+  let dataUrl;
+  try {
+    dataUrl = await invoke('read_audio_dataurl', { path: pad.filePath });
+  } catch (e) {
+    console.error('Failed to load audio:', e);
+    setPadLoading(pad.id, false);
+    return null;
+  }
+
+  return new Promise(resolve => {
+    const howl = new Howl({  // eslint-disable-line no-undef
+      src: [dataUrl],
+      loop: pad.loop,
+      preload: true,
+      onload() {
+        setPadLoading(pad.id, false);
+        rt.howls[pad.id]      = howl;
+        rt.padDurSec[pad.id]  = howl.duration();
+        updatePadDurationInCard(pad.id);
+        resolve(howl);
+      },
+      onloaderror(_, msg) {
+        console.error('Howler load error:', msg);
+        setPadLoading(pad.id, false);
+        resolve(null);
+      },
+    });
+  });
+}
+
+/** Tear down the Howl for a pad (call when pad settings change). */
+export function invalidateHowl(padId) {
+  stopPad(padId);
+  if (rt.howls[padId]) {
+    rt.howls[padId].unload();
+    delete rt.howls[padId];
+  }
+  delete rt.padDurSec[padId];
+  updatePadDurationInCard(padId);
+}
+
+// ── Playback ──────────────────────────────────────────────────
+
+export async function playPad(padId) {
+  const pad = getPad(padId);
+  if (!pad || !pad.filePath) return;
+
+  if (rt.active[padId]) {
+    if (pad.retrigger) {
+      stopPad(padId, 120);
+    } else {
+      stopPad(padId);
+      return;
+    }
+  }
+
+  const howl = await ensureHowl(pad);
+  if (!howl) return;
+
+  Howler.volume(rt.master);  // eslint-disable-line no-undef
+
+  const startVol = pad.fadeIn > 0 ? 0 : pad.volume;
+  howl.volume(startVol);
+
+  const soundId = howl.play();
+  const timers  = [];
+  rt.active[padId] = { soundId, timers };
+  updatePadUI(padId);
+
+  if (pad.fadeIn > 0) {
+    howl.fade(0, pad.volume, pad.fadeIn * 1000, soundId);
+  }
+
+  if (pad.fadeOut > 0 && !pad.loop) {
+    const dur = howl.duration(soundId);
+    if (dur > pad.fadeOut) {
+      const delay = (dur - pad.fadeOut) * 1000;
+      const t = setTimeout(() => {
+        if (rt.active[padId]?.soundId === soundId && howl.playing(soundId)) {
+          howl.fade(pad.volume, 0, pad.fadeOut * 1000, soundId);
+        }
+      }, delay);
+      timers.push(t);
+    }
+  }
+
+  howl.once('end', (id) => {
+    if (id === soundId) {
+      clearPadActive(padId);
+      updatePadUI(padId);
+    }
+  });
+}
+
+export function stopPad(padId, fadeMs = 0) {
+  const entry = rt.active[padId];
+  if (!entry) return;
+  const { soundId, timers } = entry;
+  timers.forEach(t => clearTimeout(t));
+  const howl = rt.howls[padId];
+  if (howl) {
+    if (fadeMs > 0) {
+      const vol = howl.volume(soundId);
+      howl.fade(vol, 0, fadeMs, soundId);
+      const t = setTimeout(() => {
+        if (howl) howl.stop(soundId);
+      }, fadeMs);
+      timers.push(t);
+    } else {
+      howl.stop(soundId);
+    }
+  }
+  clearPadActive(padId);
+  updatePadUI(padId);
+}
+
+export function clearPadActive(padId) {
+  const entry = rt.active[padId];
+  if (entry) entry.timers.forEach(t => clearTimeout(t));
+  delete rt.active[padId];
+}
+
+// ── Duration helpers ──────────────────────────────────────────
+
+export async function getPadDurationSec(pad) {
+  if (!pad?.filePath) return null;
+  const howl = rt.howls[pad.id] || await ensureHowl(pad);
+  const dur  = howl?.duration();
+  return Number.isFinite(dur) && dur > 0 ? dur : null;
+}
+
+export async function hydratePadDuration(padId) {
+  const pad = getPad(padId);
+  if (!pad?.filePath) {
+    updatePadDurationInCard(padId);
+    return;
+  }
+  if (Number.isFinite(rt.padDurSec[padId])) {
+    updatePadDurationInCard(padId);
+    return;
+  }
+  const howl = await ensureHowl(pad);
+  if (!howl) return;
+  rt.padDurSec[padId] = howl.duration();
+  updatePadDurationInCard(padId);
+}
+
+// ── Progress RAF loop ─────────────────────────────────────────
+
+export function startProgressLoop() {
+  if (rt.progressRaf) return;
+  function loop() {
+    for (const [padId, entry] of Object.entries(rt.active)) {
+      const howl = rt.howls[padId];
+      const pad  = getPad(padId);
+      if (!howl || !pad || !howl.playing(entry.soundId)) continue;
+      const seek = howl.seek(entry.soundId);
+      const dur  = howl.duration(entry.soundId);
+      if (!dur) continue;
+      const pct = Math.min(100, (seek / dur) * 100);
+      const el  = document.querySelector(`.pad-card[data-pad-id="${padId}"] .pad-progress`);
+      if (el) el.style.width = pct + '%';
+    }
+    rt.progressRaf = requestAnimationFrame(loop);
+  }
+  rt.progressRaf = requestAnimationFrame(loop);
+}
