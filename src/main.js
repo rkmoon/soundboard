@@ -167,7 +167,7 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('pad-fadein').addEventListener('input',  syncPadModalDisplays);
   document.getElementById('pad-fadeout').addEventListener('input', syncPadModalDisplays);
 
-  // Color picker ? swatches
+  // Color picker ↔ swatches
   document.getElementById('pad-color').addEventListener('input', e => syncSwatches(e.target.value));
   document.querySelectorAll('.swatch').forEach(sw => {
     sw.addEventListener('click', () => {
