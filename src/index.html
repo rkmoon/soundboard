@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Soundboard</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="lib/howler.min.js"></script>
+  <script type="module" src="main.js" defer></script>
+</head>
+<body>
+
+  <!-- ═══════ APP HEADER ═══════ -->
+  <header class="app-header">
+    <div class="header-brand">
+      <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 19V6l12-3v13M9 19c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2zm12-3c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2z"/>
+      </svg>
+      <span class="brand-name">Soundboard</span>
+    </div>
+
+    <div class="header-actions">
+      <button id="btn-new"  class="btn btn-ghost" title="New project">New</button>
+      <button id="btn-open" class="btn btn-ghost" title="Open project">Open</button>
+      <button id="btn-save" class="btn btn-ghost" title="Save project">Save</button>
+      <div class="header-sep"></div>
+      <button id="btn-add-pad" class="btn btn-accent">Add Sound</button>
+      <button id="btn-toggle-sequencer" class="btn btn-ghost">Hide Sequencer</button>
+    </div>
+
+    <div class="header-master">
+      <span class="master-label">Master</span>
+      <input type="range" id="master-volume" class="slider" min="0" max="100" value="100" />
+      <span id="master-volume-val" class="master-vol-val">100%</span>
+    </div>
+
+    <button id="btn-stop-all" class="btn btn-danger" title="Stop all sounds">Stop All</button>
+  </header>
+
+  <main id="app-workspace" class="app-workspace seq-open">
+    <section class="soundboard-pane">
+      <div id="pad-grid" class="pad-grid">
+        <!-- Pads rendered by JS -->
+        <button id="btn-grid-add" class="pad-add-tile">
+          <span class="pad-add-icon">+</span>
+          <span>Add Sound</span>
+        </button>
+      </div>
+    </section>
+
+    <div id="seq-resizer" class="seq-resizer" role="separator" aria-orientation="vertical" aria-label="Resize sequencer panel"></div>
+
+    <aside id="sequencer-panel" class="sequencer-panel">
+      <div class="seq-layout">
+
+      <aside class="seq-sidebar">
+        <div class="seq-sidebar-header">
+          <h3>Sequences</h3>
+          <button id="btn-new-seq" class="btn btn-accent btn-sm">New Sequence</button>
+        </div>
+        <ul id="seq-list" class="seq-list"></ul>
+      </aside>
+
+      <section class="seq-main">
+        <div id="seq-editor" class="seq-editor" hidden>
+          <div class="seq-editor-topbar">
+            <input id="seq-name-input" class="seq-name-input" type="text" placeholder="Sequence name…" />
+            <button id="btn-delete-seq" class="btn btn-ghost btn-icon" title="Delete sequence">Delete Sequence</button>
+          </div>
+
+          <div class="seq-defaults-row">
+            <label for="seq-default-crossfade">Default Sequence Crossfade (seconds)</label>
+            <div class="seq-default-crossfade-control">
+              <div id="seq-default-crossfade-display" class="param-val value-above">0.0 s</div>
+              <input id="seq-default-crossfade" class="slider seq-default-crossfade" type="range" min="0" max="100" value="0" />
+            </div>
+          </div>
+
+          <div id="seq-drop-zone" class="seq-drop-zone">Drag sounds here to add them to this sequence</div>
+
+          <div class="seq-step-list-header">
+            <span class="sc sc-num">#</span>
+            <span class="sc sc-sound">Sound</span>
+            <span class="sc sc-dur">Duration&nbsp;<small>(s, blank=full)</small></span>
+            <span class="sc sc-cf">Crossfade Next&nbsp;<small>(s)</small></span>
+            <span class="sc sc-act"></span>
+          </div>
+
+          <ul id="seq-steps" class="seq-steps-list"></ul>
+
+          <button id="btn-add-step" class="btn btn-ghost btn-sm seq-add-step-btn">Add Step</button>
+        </div>
+      </section>
+
+      </div>
+    </aside>
+  </main>
+
+  <!-- ═══════ PAD EDIT MODAL ═══════ -->
+  <div id="pad-modal" class="modal" hidden>
+    <div class="modal-backdrop" id="pad-modal-backdrop"></div>
+    <div class="modal-dialog">
+
+      <div class="modal-hdr">
+        <h2 id="pad-modal-title">Edit Sound</h2>
+        <button class="modal-close-btn" id="pad-modal-close">&#215;</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="pad-label">Label</label>
+          <input type="text" id="pad-label" class="form-input" placeholder="Sound name…" />
+        </div>
+
+        <div class="form-group">
+          <label>Color</label>
+          <div class="color-row">
+            <input type="color" id="pad-color" class="color-picker-input" value="#3b82f6" />
+            <div class="color-swatches">
+              <button class="swatch" style="--sw:#ef4444" data-color="#ef4444"></button>
+              <button class="swatch" style="--sw:#f97316" data-color="#f97316"></button>
+              <button class="swatch" style="--sw:#eab308" data-color="#eab308"></button>
+              <button class="swatch" style="--sw:#22c55e" data-color="#22c55e"></button>
+              <button class="swatch" style="--sw:#3b82f6" data-color="#3b82f6"></button>
+              <button class="swatch" style="--sw:#8b5cf6" data-color="#8b5cf6"></button>
+              <button class="swatch" style="--sw:#ec4899" data-color="#ec4899"></button>
+              <button class="swatch" style="--sw:#14b8a6" data-color="#14b8a6"></button>
+              <button class="swatch" style="--sw:#f59e0b" data-color="#f59e0b"></button>
+              <button class="swatch" style="--sw:#64748b" data-color="#64748b"></button>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Audio File</label>
+          <div class="file-row">
+            <input type="text" id="pad-filepath" class="form-input" readonly placeholder="No file selected…" />
+            <button id="btn-browse" class="btn btn-ghost">Browse…</button>
+          </div>
+          <small id="pad-duration-display" class="field-help">Length: Unknown</small>
+        </div>
+
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Volume</label>
+            <div id="pad-vol-display" class="param-val value-above">80%</div>
+            <input type="range" id="pad-volume" class="slider" min="0" max="100" value="80" />
+          </div>
+        </div>
+
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Fade In</label>
+            <div id="pad-fadein-display" class="param-val value-above">0.0 s</div>
+            <input type="range" id="pad-fadein" class="slider" min="0" max="100" value="0" />
+          </div>
+          <div class="form-group">
+            <label>Fade Out</label>
+            <div id="pad-fadeout-display" class="param-val value-above">0.0 s</div>
+            <input type="range" id="pad-fadeout" class="slider" min="0" max="100" value="0" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="pad-loop" />
+            <span>Loop</span>
+          </label>
+        </div>
+
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="pad-retrigger" />
+            <span>Retrigger When Already Playing</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="modal-ftr">
+        <button id="pad-modal-delete" class="btn btn-danger">Delete</button>
+        <div class="modal-ftr-right">
+          <button id="pad-modal-cancel" class="btn btn-ghost">Cancel</button>
+          <button id="pad-modal-save"   class="btn btn-accent">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════ ADD STEP MODAL ═══════ -->
+  <div id="step-modal" class="modal" hidden>
+    <div class="modal-backdrop" id="step-modal-backdrop"></div>
+    <div class="modal-dialog modal-sm">
+
+      <div class="modal-hdr">
+        <h2>Add Step</h2>
+        <button class="modal-close-btn" id="step-modal-close">&#215;</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="step-pad-select">Sound</label>
+          <select id="step-pad-select" class="form-select"></select>
+          <small id="step-pad-duration" class="field-help">Length: Unknown</small>
+        </div>
+        <div class="form-group">
+          <label for="step-duration">Play Duration <small>(seconds — leave blank for full length)</small></label>
+          <input type="number" id="step-duration" class="form-input" min="0.1" step="0.5" placeholder="Full length" />
+        </div>
+        <div class="form-group">
+          <label for="step-crossfade">Crossfade into Next <small>(seconds, uses sequence default unless overridden)</small></label>
+          <input type="number" id="step-crossfade" class="form-input" min="0" step="0.5" value="0" />
+        </div>
+      </div>
+
+      <div class="modal-ftr">
+        <div class="modal-ftr-right">
+          <button id="step-modal-cancel" class="btn btn-ghost">Cancel</button>
+          <button id="step-modal-save"   class="btn btn-accent">Add Step</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>
