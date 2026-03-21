@@ -86,6 +86,7 @@ jobs:
           # Commit and tag
           git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
           git commit -m "chore: bump version to $NEW_VERSION"
+          git pull --rebase origin release
           git push origin HEAD:release
           
           TAG="app-v${NEW_VERSION}"
