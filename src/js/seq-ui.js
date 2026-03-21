@@ -17,7 +17,7 @@ import {
   formatDurationClock,
 } from './state.js';
 import { setSequencerPanelOpen, setSequenceEditorOpen, syncSeqDefaultCrossfadeUI } from './resize.js';
-import { hydratePadDuration, getPadDurationSec } from './audio.js';
+import { hydratePadDuration, getPadDurationSec, getPadClipBounds } from './audio.js';
 import { queueAutosave } from './persistence.js';
 import { stopSequencer, playSequence } from './sequencer.js';
 
@@ -182,7 +182,9 @@ export function renderSeqSteps() {
 
     const colorDot  = pad ? `<span class="step-color-dot" style="background:${pad.color}"></span>` : '';
     const soundName = pad ? escHtml(pad.label) : '<em>Unknown</em>';
-    const soundDur  = pad ? (formatDurationClock(rt.padDurSec[pad.id]) || '--.---') : '';
+    const soundDur  = pad
+      ? (formatDurationClock(Number.isFinite(rt.padDurSec[pad.id]) ? getPadClipBounds(pad, rt.padDurSec[pad.id]).playSec : rt.padDurSec[pad.id]) || '--.---')
+      : '';
     const durVal    = step.duration != null ? step.duration : '';
     const hasOverride = step.crossfadeNext != null;
     const cfVal     = hasOverride ? step.crossfadeNext : '';

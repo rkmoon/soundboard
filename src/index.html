@@ -13,19 +13,35 @@
   <!-- ═══════ APP HEADER ═══════ -->
   <header class="app-header">
     <div class="header-brand">
-      <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M9 19V6l12-3v13M9 19c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2zm12-3c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2z"/>
-      </svg>
-      <span class="brand-name">Soundboard</span>
+      <img class="brand-icon" src="assets/app-icon.png" alt="App icon" />
+      <div class="brand-copy">
+        <span class="brand-name">Theater Soundboard</span>
+        <span class="brand-byline">By Ryan Moon</span>
+      </div>
     </div>
 
     <div class="header-actions">
-      <button id="btn-new"  class="btn btn-ghost" title="New project">New</button>
-      <button id="btn-open" class="btn btn-ghost" title="Open project">Open</button>
-      <button id="btn-save" class="btn btn-ghost" title="Save project">Save</button>
-      <div class="header-sep"></div>
-      <button id="btn-add-pad" class="btn btn-accent">Add Sound</button>
-      <button id="btn-toggle-sequencer" class="btn btn-ghost">Hide Sequencer</button>
+      <details id="project-menu" class="project-menu">
+        <summary class="btn btn-ghost" title="Project actions">Project</summary>
+        <div class="project-menu-list" role="menu" aria-label="Project actions">
+          <button id="btn-project-new" class="project-menu-item" role="menuitem">New Project</button>
+          <button id="btn-project-open" class="project-menu-item" role="menuitem">Open Project</button>
+          <button id="btn-project-save" class="project-menu-item" role="menuitem">Save Project</button>
+        </div>
+      </details>
+    </div>
+
+    <div class="header-theme">
+      <label for="theme-select" class="master-label">Theme</label>
+      <select id="theme-select" class="theme-select" aria-label="Select theme">
+        <option value="midnight">Midnight</option>
+        <option value="tokyo-night">Tokyo Night</option>
+        <option value="dracula">Dracula</option>
+        <option value="one-dark">One Dark</option>
+        <option value="nord">Nord</option>
+        <option value="gruvbox-dark">Gruvbox Dark</option>
+        <option value="lsu-night">LSU Night</option>
+      </select>
     </div>
 
     <div class="header-master">
@@ -116,18 +132,7 @@
           <label>Color</label>
           <div class="color-row">
             <input type="color" id="pad-color" class="color-picker-input" value="#3b82f6" />
-            <div class="color-swatches">
-              <button class="swatch" style="--sw:#ef4444" data-color="#ef4444"></button>
-              <button class="swatch" style="--sw:#f97316" data-color="#f97316"></button>
-              <button class="swatch" style="--sw:#eab308" data-color="#eab308"></button>
-              <button class="swatch" style="--sw:#22c55e" data-color="#22c55e"></button>
-              <button class="swatch" style="--sw:#3b82f6" data-color="#3b82f6"></button>
-              <button class="swatch" style="--sw:#8b5cf6" data-color="#8b5cf6"></button>
-              <button class="swatch" style="--sw:#ec4899" data-color="#ec4899"></button>
-              <button class="swatch" style="--sw:#14b8a6" data-color="#14b8a6"></button>
-              <button class="swatch" style="--sw:#f59e0b" data-color="#f59e0b"></button>
-              <button class="swatch" style="--sw:#64748b" data-color="#64748b"></button>
-            </div>
+            <div id="pad-color-swatches" class="color-swatches"></div>
           </div>
         </div>
 
@@ -137,7 +142,28 @@
             <input type="text" id="pad-filepath" class="form-input" readonly placeholder="No file selected…" />
             <button id="btn-browse" class="btn btn-ghost">Browse…</button>
           </div>
+          <div class="file-row">
+            <button id="btn-preview-clip" class="btn btn-ghost" type="button">Preview Clip</button>
+            <small id="pad-preview-status" class="field-help">Not playing</small>
+          </div>
           <small id="pad-duration-display" class="field-help">Length: Unknown</small>
+          <small id="pad-clip-duration-display" class="field-help">Clip Length: Unknown</small>
+        </div>
+
+        <div class="form-group">
+          <label>Waveform Trim Editor</label>
+          <canvas id="pad-waveform" class="pad-waveform" width="720" height="120" aria-label="Waveform trim editor"></canvas>
+          <small class="field-help">Drag the left and right handles to set clip start and end.</small>
+        </div>
+
+        <div class="form-group">
+          <label>Loudness Matching</label>
+          <div class="file-row">
+            <label for="pad-target-lufs" class="field-help">Target LUFS</label>
+            <input type="number" id="pad-target-lufs" class="form-input" value="-16" min="-36" max="-6" step="0.5" />
+            <button id="btn-match-loudness" class="btn btn-ghost" type="button">Match Loudness</button>
+          </div>
+          <small id="pad-loudness-display" class="field-help">Loudness: Unknown • Gain: +0.0 dB</small>
         </div>
 
         <div class="form-row-2">
@@ -145,6 +171,17 @@
             <label>Volume</label>
             <div id="pad-vol-display" class="param-val value-above">80%</div>
             <input type="range" id="pad-volume" class="slider" min="0" max="100" value="80" />
+          </div>
+        </div>
+
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="pad-trim-start">Trim Start (s)</label>
+            <input type="number" id="pad-trim-start" class="form-input" min="0" step="0.1" value="0" />
+          </div>
+          <div class="form-group">
+            <label for="pad-trim-end">Trim End (s)</label>
+            <input type="number" id="pad-trim-end" class="form-input" min="0" step="0.1" value="0" />
           </div>
         </div>
 

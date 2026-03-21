@@ -11,12 +11,49 @@
 //  function bodies, not at module initialisation time.
 // ═══════════════════════════════════════════════════════════════
 
-import { rt, getPad, formatDurationClock, invoke } from './state.js';
+import { rt, getPad, invoke } from './state.js';
 import {
   updatePadDurationInCard,
   setPadLoading,
   updatePadUI,
 } from './pad-ui.js';
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+export function getPadClipBounds(pad, totalDurationSec) {
+  if (!Number.isFinite(totalDurationSec) || totalDurationSec <= 0) {
+    return { startSec: 0, endSec: 0, playSec: 0 };
+  }
+
+  const minPlayableSec = Math.min(0.05, totalDurationSec);
+  let startSec = clamp(Number(pad?.trimStart) || 0, 0, totalDurationSec);
+  let endTrimSec = clamp(Number(pad?.trimEnd) || 0, 0, totalDurationSec);
+  let endSec = totalDurationSec - endTrimSec;
+
+  if (endSec - startSec < minPlayableSec) {
+    if (startSec > totalDurationSec - minPlayableSec) {
+      startSec = Math.max(0, totalDurationSec - minPlayableSec);
+      endSec = totalDurationSec;
+    } else {
+      endSec = startSec + minPlayableSec;
+    }
+  }
+
+  return {
+    startSec,
+    endSec,
+    playSec: Math.max(minPlayableSec, endSec - startSec),
+  };
+}
+
+export function getEffectivePadVolume(pad) {
+  const base = Number.isFinite(pad?.volume) ? pad.volume : 0.8;
+  const gainDb = Number.isFinite(pad?.gainDb) ? pad.gainDb : 0;
+  const gainMul = Math.pow(10, gainDb / 20);
+  return Math.max(0, Math.min(1, base * gainMul));
+}
 
 // ── Howler management ─────────────────────────────────────────
 
@@ -86,37 +123,54 @@ export async function playPad(padId) {
 
   Howler.volume(rt.master);  // eslint-disable-line no-undef
 
-  const startVol = pad.fadeIn > 0 ? 0 : pad.volume;
-  howl.volume(startVol);
+  const totalDur = howl.duration();
+  const clip = getPadClipBounds(pad, totalDur);
+  const targetVol = getEffectivePadVolume(pad);
+  const timers = [];
+  rt.active[padId] = { soundId: null, timers };
 
-  const soundId = howl.play();
-  const timers  = [];
-  rt.active[padId] = { soundId, timers };
-  updatePadUI(padId);
+  const startIteration = (isFirstIteration) => {
+    const soundId = howl.play();
+    rt.active[padId].soundId = soundId;
+    howl.loop(false, soundId);
 
-  if (pad.fadeIn > 0) {
-    howl.fade(0, pad.volume, pad.fadeIn * 1000, soundId);
-  }
+    const startVol = (pad.fadeIn > 0 && isFirstIteration) ? 0 : targetVol;
+    howl.volume(startVol, soundId);
+    if (clip.startSec > 0) {
+      howl.seek(clip.startSec, soundId);
+    }
 
-  if (pad.fadeOut > 0 && !pad.loop) {
-    const dur = howl.duration(soundId);
-    if (dur > pad.fadeOut) {
-      const delay = (dur - pad.fadeOut) * 1000;
-      const t = setTimeout(() => {
+    if (pad.fadeIn > 0 && isFirstIteration) {
+      howl.fade(0, targetVol, pad.fadeIn * 1000, soundId);
+    }
+
+    if (pad.fadeOut > 0 && !pad.loop && clip.playSec > pad.fadeOut) {
+      const delay = (clip.playSec - pad.fadeOut) * 1000;
+      const fadeTimer = setTimeout(() => {
         if (rt.active[padId]?.soundId === soundId && howl.playing(soundId)) {
-          howl.fade(pad.volume, 0, pad.fadeOut * 1000, soundId);
+          howl.fade(targetVol, 0, pad.fadeOut * 1000, soundId);
         }
       }, delay);
-      timers.push(t);
+      timers.push(fadeTimer);
     }
-  }
 
-  howl.once('end', (id) => {
-    if (id === soundId) {
+    const stopTimer = setTimeout(() => {
+      if (rt.active[padId]?.soundId !== soundId) return;
+      if (howl.playing(soundId)) howl.stop(soundId);
+
+      if (pad.loop && rt.active[padId]) {
+        startIteration(false);
+        return;
+      }
+
       clearPadActive(padId);
       updatePadUI(padId);
-    }
-  });
+    }, clip.playSec * 1000);
+    timers.push(stopTimer);
+  };
+
+  startIteration(true);
+  updatePadUI(padId);
 }
 
 export function stopPad(padId, fadeMs = 0) {
@@ -182,9 +236,11 @@ export function startProgressLoop() {
       const pad  = getPad(padId);
       if (!howl || !pad || !howl.playing(entry.soundId)) continue;
       const seek = howl.seek(entry.soundId);
-      const dur  = howl.duration(entry.soundId);
-      if (!dur) continue;
-      const pct = Math.min(100, (seek / dur) * 100);
+      const totalDur = howl.duration(entry.soundId) || howl.duration();
+      if (!totalDur) continue;
+      const clip = getPadClipBounds(pad, totalDur);
+      if (!clip.playSec) continue;
+      const pct = Math.min(100, Math.max(0, ((seek - clip.startSec) / clip.playSec) * 100));
       const el  = document.querySelector(`.pad-card[data-pad-id="${padId}"] .pad-progress`);
       if (el) el.style.width = pct + '%';
     }

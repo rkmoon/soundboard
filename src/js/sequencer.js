@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { rt, getSeq, getPad, getEffectiveStepCrossfade } from './state.js';
-import { ensureHowl, stopPad, clearPadActive } from './audio.js';
+import { ensureHowl, stopPad, clearPadActive, getPadClipBounds, getEffectivePadVolume } from './audio.js';
 import {
   updateSeqStepHighlight,
   updateSeqTransportUI,
@@ -64,17 +64,25 @@ export async function advanceSequencer(stepIdx, crossfadeInMs) {
 
   Howler.volume(rt.master);  // eslint-disable-line no-undef
 
+  const targetVol = getEffectivePadVolume(pad);
   const fadeInMs = Math.max(crossfadeInMs, pad.fadeIn * 1000);
-  howl.volume(fadeInMs > 0 ? 0 : pad.volume);
+  howl.volume(fadeInMs > 0 ? 0 : targetVol);
   const soundId = howl.play();
+  howl.loop(pad.loop, soundId);
 
-  if (fadeInMs > 0) {
-    howl.fade(0, pad.volume, fadeInMs, soundId);
+  const totalDur = howl.duration(soundId) || howl.duration();
+  const clip = getPadClipBounds(pad, totalDur);
+  if (clip.startSec > 0) {
+    howl.seek(clip.startSec, soundId);
   }
 
-  const naturalDur  = howl.duration(soundId);
+  if (fadeInMs > 0) {
+    howl.fade(0, targetVol, fadeInMs, soundId);
+  }
+
+  const naturalDur  = clip.playSec;
   const stepDurSec  = (step.duration != null && step.duration > 0)
-    ? step.duration
+    ? Math.min(step.duration, naturalDur)
     : (!pad.loop ? naturalDur : null); // null = manual advance for loops with no duration
 
   const crossfadeOutMs  = getEffectiveStepCrossfade(step, seq) * 1000;
@@ -89,7 +97,7 @@ export async function advanceSequencer(stepIdx, crossfadeInMs) {
       const foAt = (stepDurSec - pad.fadeOut) * 1000;
       rt.seqTimers.push(setTimeout(() => {
         if (howl.playing(soundId))
-          howl.fade(pad.volume, 0, pad.fadeOut * 1000, soundId);
+          howl.fade(targetVol, 0, pad.fadeOut * 1000, soundId);
       }, foAt));
     }
 
@@ -97,10 +105,10 @@ export async function advanceSequencer(stepIdx, crossfadeInMs) {
       if (rt.seqState !== 'playing' || rt.seqStep !== stepIdx) return;
 
       if (crossfadeOutMs > 0 && howl.playing(soundId)) {
-        howl.fade(pad.volume, 0, crossfadeOutMs, soundId);
+        howl.fade(targetVol, 0, crossfadeOutMs, soundId);
         rt.seqTimers.push(setTimeout(() => howl.stop(soundId), crossfadeOutMs));
       } else {
-        if (step.duration != null && howl.playing(soundId)) {
+        if (howl.playing(soundId)) {
           howl.stop(soundId);
         }
       }
