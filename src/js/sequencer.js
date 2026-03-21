@@ -101,9 +101,14 @@ export async function advanceSequencer(stepIdx, crossfadeInMs) {
       }, foAt));
     }
 
+    // Trigger next step START at transition time (so it fades in while current fades out)
     rt.seqTimers.push(setTimeout(async () => {
       if (rt.seqState !== 'playing' || rt.seqStep !== stepIdx) return;
+      
+      // Start the next step with crossfade overlap
+      await advanceSequencer(stepIdx + 1, crossfadeOutMs);
 
+      // Schedule current sound fade-out AFTER next step has started
       if (crossfadeOutMs > 0 && howl.playing(soundId)) {
         howl.fade(targetVol, 0, crossfadeOutMs, soundId);
         rt.seqTimers.push(setTimeout(() => howl.stop(soundId), crossfadeOutMs));
@@ -112,8 +117,6 @@ export async function advanceSequencer(stepIdx, crossfadeInMs) {
           howl.stop(soundId);
         }
       }
-
-      await advanceSequencer(stepIdx + 1, crossfadeOutMs);
     }, transitionAt));
   }
 
