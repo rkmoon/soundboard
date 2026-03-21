@@ -105,7 +105,7 @@ export async function advanceSequencer(stepIdx, crossfadeInMs) {
       if (rt.seqState !== 'playing' || rt.seqStep !== stepIdx) return;
 
       if (crossfadeOutMs > 0 && howl.playing(soundId)) {
-        howl.fade(pad.volume, 0, crossfadeOutMs, soundId);
+        howl.fade(targetVol, 0, crossfadeOutMs, soundId);
         rt.seqTimers.push(setTimeout(() => howl.stop(soundId), crossfadeOutMs));
       } else {
         if (howl.playing(soundId)) {
