@@ -90,6 +90,7 @@ jobs:
           git push origin HEAD:release
           
           TAG="app-v${NEW_VERSION}"
+          git fetch --tags origin
           if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
             echo "Tag $TAG already exists. Skipping."
           else
