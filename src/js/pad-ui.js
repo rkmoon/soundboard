@@ -226,7 +226,9 @@ export function updatePadDurationInCard(padId) {
   if (!el) return;
   const pad = getPad(padId);
   const totalSec = rt.padDurSec[padId];
-  const sec = pad && Number.isFinite(totalSec) ? getPadClipBounds(pad, totalSec).playSec : totalSec;
+  const clipSec = pad && Number.isFinite(totalSec) ? getPadClipBounds(pad, totalSec).playSec : totalSec;
+  const speed = (pad && Number.isFinite(pad.playbackSpeed) && pad.playbackSpeed > 0) ? pad.playbackSpeed : 1.0;
+  const sec = Number.isFinite(clipSec) ? clipSec / speed : clipSec;
   const txt = formatDurationClock(sec);
   el.textContent = txt || '\u00A0';
 }
@@ -287,7 +289,7 @@ export function buildPadCard(pad) {
       <div class="pad-progress"></div>
       <span class="pad-play-text">
         <span class="pad-play-name">${escHtml(pad.label)}</span>
-        <span class="pad-play-duration">${formatDurationClock(Number.isFinite(rt.padDurSec[pad.id]) ? getPadClipBounds(pad, rt.padDurSec[pad.id]).playSec : rt.padDurSec[pad.id]) || '&nbsp;'}</span>
+        <span class="pad-play-duration">${formatDurationClock(Number.isFinite(rt.padDurSec[pad.id]) ? getPadClipBounds(pad, rt.padDurSec[pad.id]).playSec / ((Number.isFinite(pad.playbackSpeed) && pad.playbackSpeed > 0) ? pad.playbackSpeed : 1.0) : rt.padDurSec[pad.id]) || '&nbsp;'}</span>
       </span>
     </div>
     <div class="pad-toggle-row">

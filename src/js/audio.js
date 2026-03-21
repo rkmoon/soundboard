@@ -136,6 +136,8 @@ export async function playPad(padId) {
 
     const startVol = (pad.fadeIn > 0 && isFirstIteration) ? 0 : targetVol;
     howl.volume(startVol, soundId);
+    const playbackSpeed = Number.isFinite(pad.playbackSpeed) ? pad.playbackSpeed : 1.0;
+    howl.rate(playbackSpeed, soundId);
     if (clip.startSec > 0) {
       howl.seek(clip.startSec, soundId);
     }
@@ -145,7 +147,7 @@ export async function playPad(padId) {
     }
 
     if (pad.fadeOut > 0 && !pad.loop && clip.playSec > pad.fadeOut) {
-      const delay = (clip.playSec - pad.fadeOut) * 1000;
+      const delay = (clip.playSec - pad.fadeOut) / playbackSpeed * 1000;
       const fadeTimer = setTimeout(() => {
         if (rt.active[padId]?.soundId === soundId && howl.playing(soundId)) {
           howl.fade(targetVol, 0, pad.fadeOut * 1000, soundId);
@@ -165,7 +167,7 @@ export async function playPad(padId) {
 
       clearPadActive(padId);
       updatePadUI(padId);
-    }, clip.playSec * 1000);
+    }, clip.playSec / playbackSpeed * 1000);
     timers.push(stopTimer);
   };
 

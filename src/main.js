@@ -12,7 +12,7 @@ import { startProgressLoop } from './js/audio.js';
 import { stopSequencer, stopAll } from './js/sequencer.js';
 import { renderPadGrid } from './js/pad-ui.js';
 import { renderSeqList, renderSeqOverview, renderSeqSteps, updateSeqTransportUI, selectSequence, openSeqEditor } from './js/seq-ui.js';
-import { openNewPadModal, closePadModal, savePadModal, deletePad, syncPadModalDisplays, syncPadTrimDisplays, previewPadModalClip, matchPadModalLoudness, onPadWaveformPointerDown, onPadWaveformPointerMove, onPadWaveformPointerUp, openStepModal, closeStepModal, saveStepModal, updateStepModalDuration, syncSwatches, browseAudioFiles } from './js/modals.js';
+import { openNewPadModal, closePadModal, savePadModal, deletePad, syncPadModalDisplays, syncPadTrimDisplays, previewPadModalClip, matchPadModalLoudness, onPadWaveformPointerDown, onPadWaveformPointerMove, onPadWaveformPointerUp, openStepModal, closeStepModal, saveStepModal, updateStepModalDuration, syncSwatches, browseAudioFiles, syncPadPlaybackSpeedDisplay, onPadPlaybackSpeedChange } from './js/modals.js';
 import { queueAutosave, saveAutosave, loadAutosave, saveProject, openProject, newProject } from './js/persistence.js';
 
 window.addEventListener('DOMContentLoaded', () => {
@@ -223,6 +223,7 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('pad-volume').addEventListener('input',  syncPadModalDisplays);
   document.getElementById('pad-fadein').addEventListener('input',  syncPadModalDisplays);
   document.getElementById('pad-fadeout').addEventListener('input', syncPadModalDisplays);
+  document.getElementById('pad-playback-speed').addEventListener('input', onPadPlaybackSpeedChange);
   document.getElementById('pad-trim-start').addEventListener('input', syncPadTrimDisplays);
   document.getElementById('pad-trim-end').addEventListener('input', syncPadTrimDisplays);
   document.getElementById('btn-preview-clip').addEventListener('click', previewPadModalClip);

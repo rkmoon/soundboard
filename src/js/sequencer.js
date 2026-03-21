@@ -69,6 +69,8 @@ export async function advanceSequencer(stepIdx, crossfadeInMs) {
   howl.volume(fadeInMs > 0 ? 0 : targetVol);
   const soundId = howl.play();
   howl.loop(pad.loop, soundId);
+  const playbackSpeed = Number.isFinite(pad.playbackSpeed) ? pad.playbackSpeed : 1.0;
+  howl.rate(playbackSpeed, soundId);
 
   const totalDur = howl.duration(soundId) || howl.duration();
   const clip = getPadClipBounds(pad, totalDur);
@@ -91,10 +93,10 @@ export async function advanceSequencer(stepIdx, crossfadeInMs) {
   function scheduleTransition() {
     if (stepDurSec == null) return; // loop — wait for manual Next
 
-    const transitionAt = Math.max(0, stepDurSec - crossfadeOutSec) * 1000;
+    const transitionAt = Math.max(0, stepDurSec - crossfadeOutSec) / playbackSpeed * 1000;
 
     if (crossfadeOutMs === 0 && pad.fadeOut > 0 && stepDurSec > pad.fadeOut) {
-      const foAt = (stepDurSec - pad.fadeOut) * 1000;
+      const foAt = (stepDurSec - pad.fadeOut) / playbackSpeed * 1000;
       rt.seqTimers.push(setTimeout(() => {
         if (howl.playing(soundId))
           howl.fade(targetVol, 0, pad.fadeOut * 1000, soundId);
