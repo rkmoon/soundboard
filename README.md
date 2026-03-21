@@ -2,7 +2,17 @@
 
 A desktop theater soundboard and sequence editor built with Tauri v2, vanilla JavaScript, and Howler.js.
 
-## Features
+## What It Is
+
+This app is designed for live cueing and playback during shows, rehearsals, and events.
+It gives you:
+
+- A pad-based soundboard for one-shot or looping cues
+- A sequence editor for chaining sounds with per-step timing and crossfades
+- Fast drag-and-drop workflow between the soundboard and sequencer
+- Persistent autosave for project state and UI layout
+
+## Core Features
 
 - Sound pads with per-pad volume, fade in, fade out, loop, and retrigger controls
 - Live playback progress and status indicators
@@ -47,29 +57,66 @@ Create a production build:
 npm run tauri build
 ```
 
+## How To Use
+
+### 1. Add Sounds
+
+- Click Add Sound (or the + tile in the grid)
+- Choose an audio file
+- Set label, color, volume, fade in/out, loop, and retrigger
+
+Supported audio formats depend on platform codecs and Howler/browser decoding support.
+
+### 2. Play From Pads
+
+- Click a pad to play
+- Click again to stop (or retrigger if retrigger is enabled)
+- Use Stop All in the header to immediately stop everything
+
+### 3. Build Sequences
+
+- Create a sequence from the sequencer panel
+- Drag sounds from the pad grid into:
+	- the sequence list (append)
+	- specific step positions in the active sequence (insert)
+- Open Edit to modify sequence name, default crossfade, and steps
+
+### 4. Edit Step Behavior
+
+For each step:
+
+- Duration:
+	- 0/Full means use the clip's natural duration
+	- Set a value to force step length
+- Crossfade:
+	- Default uses the sequence default crossfade
+	- Set a value to override for that step
+
+### 5. Run Sequence Transport
+
+- Play starts the selected sequence
+- Stop halts playback
+- Next forces transition to the next step using current crossfade behavior
+
+## Soundboard Controls Explained
+
+- Volume: playback level for that pad
+- Fade In: time to ramp from silence to target level
+- Fade Out: time to ramp down before stop/end
+- Loop: repeats the clip continuously
+- Retrigger: when already playing, a new trigger restarts playback instead of acting as toggle-stop
+
+## Saving and Persistence
+
+- The app autosaves pads, sequences, and key UI state locally
+- You can also save and open project files manually from the top bar
+- Existing projects are normalized on load for backward compatibility
+
 ## Project Structure
 
 ```text
 src/            Frontend app (HTML/CSS/JS)
 src-tauri/      Rust/Tauri app, config, and capabilities
-```
-
-## Repository Initialization
-
-If this directory is not yet a git repository:
-
-```bash
-git init
-git add .
-git commit -m "Initial commit"
-```
-
-Optional: connect to GitHub after creating an empty remote repository:
-
-```bash
-git remote add origin <your-repo-url>
-git branch -M main
-git push -u origin main
 ```
 
 ## Notes
