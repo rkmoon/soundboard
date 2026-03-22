@@ -9,7 +9,7 @@ import {
   sliderToVol, sliderToSec,
   formatSec, dialogOpen, invoke,
 } from './state.js';
-import { getPadDurationSec, invalidateHowl, ensureHowl, getPadClipBounds, getEffectivePadVolume } from './audio.js';
+import { getPadDurationSec, invalidateHowl, ensureHowl, getPadClipBounds, getPadBaseVolume, applyPadOutputGain, cleanupHowlOutputGainNodes } from './audio.js';
 import { renderPadGrid, buildPadCard } from './pad-ui.js';
 import { renderSeqList, renderSeqOverview, renderSeqSteps } from './seq-ui.js';
 import { queueAutosave } from './persistence.js';
@@ -24,6 +24,8 @@ let modalWaveformPeaks = [];
 let waveformDragMode = null;
 let modalGainDb = 0;
 let modalLoudnessLufs = null;
+let modalLoudnessTimer = null;
+let modalLoudnessRunId = 0;
 
 const waveformAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
@@ -40,6 +42,98 @@ function clearPadModalPreviewTimers() {
 function setPadLoudnessDisplay(text) {
   const el = document.getElementById('pad-loudness-display');
   if (el) el.textContent = text;
+}
+
+function formatLoudnessDisplay(loudnessLufs, gainDb) {
+  return `Loudness: ${Number.isFinite(loudnessLufs) ? `${loudnessLufs.toFixed(1)} LUFS` : 'Unknown'} • Gain: ${gainDb >= 0 ? '+' : ''}${gainDb.toFixed(1)} dB`;
+}
+
+function getTargetLufsValue() {
+  const input = document.getElementById('pad-target-lufs');
+  const fallback = Number.isFinite(ui.loudnessTargetLufs) ? ui.loudnessTargetLufs : -16;
+  const value = Number(input?.value);
+  return Number.isFinite(value) ? Math.max(-36, Math.min(-6, value)) : fallback;
+}
+
+function updateTargetLufsInput() {
+  const input = document.getElementById('pad-target-lufs');
+  const display = document.getElementById('pad-target-lufs-display');
+  const value = Number.isFinite(ui.loudnessTargetLufs) ? Math.max(-36, Math.min(-6, ui.loudnessTargetLufs)) : -16;
+  if (input) input.value = String(value);
+  if (display) display.textContent = `${value.toFixed(1)} LUFS`;
+}
+
+export function syncProjectTargetLufsUI() {
+  updateTargetLufsInput();
+}
+
+function analyzeLoudnessMatch(buffer, trimStart, trimEnd, targetLufs) {
+  if (!buffer) return null;
+  const clip = getPadClipBounds({ trimStart, trimEnd }, buffer.duration);
+  const loudnessLufs = estimateIntegratedLufs(buffer, clip.startSec, clip.endSec);
+  if (!Number.isFinite(loudnessLufs)) return null;
+  const gainDb = Math.max(-24, Math.min(24, targetLufs - loudnessLufs));
+  return { loudnessLufs, gainDb };
+}
+
+async function applyLoudnessMatchToPad(pad, targetLufs = (Number.isFinite(ui.loudnessTargetLufs) ? ui.loudnessTargetLufs : -16)) {
+  if (!pad?.filePath) {
+    pad.loudnessLufs = null;
+    pad.gainDb = 0;
+    return null;
+  }
+
+  try {
+    const buffer = await decodeAudioBufferFromPath(pad.filePath);
+    const result = analyzeLoudnessMatch(buffer, pad.trimStart, pad.trimEnd, targetLufs);
+    pad.loudnessLufs = result?.loudnessLufs ?? null;
+    pad.gainDb = result?.gainDb ?? 0;
+    return result;
+  } catch (error) {
+    console.error('Failed loudness analysis:', error);
+    pad.loudnessLufs = null;
+    pad.gainDb = 0;
+    return null;
+  }
+}
+
+async function refreshPadModalLoudness(options = {}) {
+  const { silent = false } = options;
+  const filePath = document.getElementById('pad-filepath')?.value || '';
+  const runId = ++modalLoudnessRunId;
+
+  if (!filePath) {
+    modalLoudnessLufs = null;
+    modalGainDb = 0;
+    setPadLoudnessDisplay(formatLoudnessDisplay(null, 0));
+    return null;
+  }
+
+  if (!silent) setPadLoudnessDisplay('Analyzing loudness...');
+
+  await ensureModalWaveform(filePath);
+  if (runId !== modalLoudnessRunId) return null;
+  if (!modalWaveformBuffer) {
+    modalLoudnessLufs = null;
+    modalGainDb = 0;
+    setPadLoudnessDisplay('Loudness analysis failed');
+    return null;
+  }
+
+  const { trimStart, trimEnd } = clampModalTrimValues();
+  const result = analyzeLoudnessMatch(modalWaveformBuffer, trimStart, trimEnd, getTargetLufsValue());
+  modalLoudnessLufs = result?.loudnessLufs ?? null;
+  modalGainDb = result?.gainDb ?? 0;
+  setPadLoudnessDisplay(formatLoudnessDisplay(modalLoudnessLufs, modalGainDb));
+  return result;
+}
+
+function schedulePadModalLoudnessRefresh() {
+  clearTimeout(modalLoudnessTimer);
+  modalLoudnessTimer = setTimeout(() => {
+    modalLoudnessTimer = null;
+    refreshPadModalLoudness({ silent: true });
+  }, 140);
 }
 
 function estimateIntegratedLufs(buffer, startSec = 0, endSec = null) {
@@ -193,7 +287,7 @@ function setTrimFromWaveformX(clientX, mode) {
   if (!canvas) return;
   const rect = canvas.getBoundingClientRect();
   const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-  const timeSec = Math.round((ratio * modalAudioDurationSec) * 10) / 10;
+  const timeSec = Math.round((ratio * modalAudioDurationSec) * 100) / 100;
 
   const startInput = document.getElementById('pad-trim-start');
   const endInput = document.getElementById('pad-trim-end');
@@ -202,7 +296,7 @@ function setTrimFromWaveformX(clientX, mode) {
   if (mode === 'start') {
     startInput.value = String(timeSec);
   } else {
-    endInput.value = String(Math.max(0, Math.round((modalAudioDurationSec - timeSec) * 10) / 10));
+    endInput.value = String(Math.max(0, Math.round((modalAudioDurationSec - timeSec) * 100) / 100));
   }
 
   syncPadTrimDisplays();
@@ -240,34 +334,7 @@ export function onPadWaveformPointerUp(event) {
 }
 
 export async function matchPadModalLoudness() {
-  const filePath = document.getElementById('pad-filepath')?.value || '';
-  if (!filePath) {
-    setPadLoudnessDisplay('Loudness: Unknown • Gain: +0.0 dB');
-    return;
-  }
-
-  await ensureModalWaveform(filePath);
-  if (!modalWaveformBuffer) {
-    setPadLoudnessDisplay('Loudness analysis failed');
-    return;
-  }
-
-  const { trimStart, trimEnd } = clampModalTrimValues();
-  const clip = getPadClipBounds({ trimStart, trimEnd }, modalWaveformBuffer.duration);
-  const measured = estimateIntegratedLufs(modalWaveformBuffer, clip.startSec, clip.endSec);
-  if (!Number.isFinite(measured)) {
-    setPadLoudnessDisplay('Loudness: Unknown • Gain: +0.0 dB');
-    return;
-  }
-
-  const target = Number(document.getElementById('pad-target-lufs')?.value);
-  const targetLufs = Number.isFinite(target) ? target : -16;
-  const gainDb = Math.max(-24, Math.min(24, targetLufs - measured));
-
-  modalLoudnessLufs = measured;
-  modalGainDb = gainDb;
-
-  setPadLoudnessDisplay(`Loudness: ${measured.toFixed(1)} LUFS • Gain: ${gainDb >= 0 ? '+' : ''}${gainDb.toFixed(1)} dB`);
+  await refreshPadModalLoudness();
 }
 
 function clampModalTrimValues() {
@@ -295,8 +362,8 @@ function clampModalTrimValues() {
     trimEnd = Math.min(trimEnd, modalAudioDurationSec);
   }
 
-  trimStart = Math.round(trimStart * 10) / 10;
-  trimEnd = Math.round(trimEnd * 10) / 10;
+  trimStart = Math.round(trimStart * 100) / 100;
+  trimEnd = Math.round(trimEnd * 100) / 100;
   trimStartInput.value = String(trimStart);
   trimEndInput.value = String(trimEnd);
   return { trimStart, trimEnd };
@@ -314,6 +381,9 @@ export function syncPadTrimDisplays() {
 
   const clip = getPadClipBounds({ trimStart, trimEnd }, modalAudioDurationSec);
   clipEl.textContent = 'Clip Length: ' + formatSec(clip.playSec);
+  if (document.getElementById('pad-modal') && !document.getElementById('pad-modal').hidden) {
+    schedulePadModalLoudnessRefresh();
+  }
   renderPadWaveform();
 }
 
@@ -322,6 +392,7 @@ export function stopPadModalPreview() {
   const howl = rt.howls[PAD_MODAL_PREVIEW_ID];
   if (howl) {
     howl.stop();
+    cleanupHowlOutputGainNodes(howl);
     howl.unload();
     delete rt.howls[PAD_MODAL_PREVIEW_ID];
   }
@@ -344,16 +415,17 @@ export function openPadModal(padId) {
   document.getElementById('pad-fadein').value   = Math.round(pad.fadeIn * 10);
   document.getElementById('pad-fadeout').value  = Math.round(pad.fadeOut * 10);
   document.getElementById('pad-playback-speed').value = Number.isFinite(pad.playbackSpeed) ? pad.playbackSpeed : 1.0;
-  document.getElementById('pad-trim-start').value = (Number(pad.trimStart) || 0).toFixed(1);
-  document.getElementById('pad-trim-end').value = (Number(pad.trimEnd) || 0).toFixed(1);
+  document.getElementById('pad-trim-start').value = (Number(pad.trimStart) || 0).toFixed(2);
+  document.getElementById('pad-trim-end').value = (Number(pad.trimEnd) || 0).toFixed(2);
   document.getElementById('pad-loop').checked   = pad.loop;
   document.getElementById('pad-retrigger').checked = !!pad.retrigger;
-  document.getElementById('pad-target-lufs').value = '-16';
+  ui.loudnessTargetLufs = Number.isFinite(ui.loudnessTargetLufs) ? ui.loudnessTargetLufs : -16;
+  updateTargetLufsInput();
   document.getElementById('pad-modal-delete').style.display = '';
   setPadPreviewStatus('Not playing');
   modalGainDb = Number.isFinite(pad.gainDb) ? pad.gainDb : 0;
   modalLoudnessLufs = Number.isFinite(pad.loudnessLufs) ? pad.loudnessLufs : null;
-  setPadLoudnessDisplay(`Loudness: ${Number.isFinite(pad.loudnessLufs) ? pad.loudnessLufs.toFixed(1) + ' LUFS' : 'Unknown'} • Gain: ${(pad.gainDb || 0) >= 0 ? '+' : ''}${(pad.gainDb || 0).toFixed(1)} dB`);
+  setPadLoudnessDisplay(formatLoudnessDisplay(modalLoudnessLufs, modalGainDb));
 
   syncPadModalDisplays();
   updatePadDurationDisplay(pad.filePath, pad.label);
@@ -374,16 +446,17 @@ export function openNewPadModal(filePath = '', label = '') {
   document.getElementById('pad-fadein').value   = 0;
   document.getElementById('pad-fadeout').value  = 0;
   document.getElementById('pad-playback-speed').value = 1.0;
-  document.getElementById('pad-trim-start').value = '0.0';
-  document.getElementById('pad-trim-end').value = '0.0';
+  document.getElementById('pad-trim-start').value = '0.00';
+  document.getElementById('pad-trim-end').value = '0.00';
   document.getElementById('pad-loop').checked   = false;
   document.getElementById('pad-retrigger').checked = false;
-  document.getElementById('pad-target-lufs').value = '-16';
+  ui.loudnessTargetLufs = Number.isFinite(ui.loudnessTargetLufs) ? ui.loudnessTargetLufs : -16;
+  updateTargetLufsInput();
   document.getElementById('pad-modal-delete').style.display = 'none';
   setPadPreviewStatus('Not playing');
   modalGainDb = 0;
   modalLoudnessLufs = null;
-  setPadLoudnessDisplay('Loudness: Unknown • Gain: +0.0 dB');
+  setPadLoudnessDisplay(formatLoudnessDisplay(null, 0));
 
   syncPadModalDisplays();
   updatePadDurationDisplay(filePath, label);
@@ -396,6 +469,9 @@ export function openNewPadModal(filePath = '', label = '') {
 
 export function closePadModal() {
   stopPadModalPreview();
+  clearTimeout(modalLoudnessTimer);
+  modalLoudnessTimer = null;
+  modalLoudnessRunId += 1;
   modalAudioDurationSec = null;
   modalWaveformBuffer = null;
   modalWaveformPath = '';
@@ -422,7 +498,9 @@ export async function updatePadDurationDisplay(filePath, labelHint = '') {
   if (!filePath) {
     modalAudioDurationSec = null;
     durationEl.textContent = 'Length: Unknown';
-    setPadLoudnessDisplay('Loudness: Unknown • Gain: +0.0 dB');
+    modalLoudnessLufs = null;
+    modalGainDb = 0;
+    setPadLoudnessDisplay(formatLoudnessDisplay(null, 0));
     modalWaveformBuffer = null;
     modalWaveformPath = '';
     modalWaveformPeaks = [];
@@ -505,9 +583,10 @@ export async function previewPadModalClip() {
     return;
   }
 
-  const targetVol = getEffectivePadVolume(previewPad);
+  const targetVol = getPadBaseVolume(previewPad);
   const soundId = howl.play();
   howl.loop(false, soundId);
+  applyPadOutputGain(howl, soundId, previewPad);
   howl.volume(previewPad.fadeIn > 0 ? 0 : targetVol, soundId);
   if (clip.startSec > 0) {
     howl.seek(clip.startSec, soundId);
@@ -545,11 +624,25 @@ export function addPadsFromFiles(filePaths) {
   data.pads.push(...newPads);
   renderPadGrid();
   queueAutosave();
+
+  const targetLufs = Number.isFinite(ui.loudnessTargetLufs) ? ui.loudnessTargetLufs : -16;
+  Promise.all(newPads.map(pad => applyLoudnessMatchToPad(pad, targetLufs)))
+    .then(() => {
+      renderPadGrid();
+      queueAutosave();
+    })
+    .catch(error => {
+      console.error('Failed import loudness matching:', error);
+    });
 }
 
-export function savePadModal() {
+export async function savePadModal() {
   const label    = document.getElementById('pad-label').value.trim() || 'New Sound';
   const filePath = document.getElementById('pad-filepath').value;
+  ui.loudnessTargetLufs = getTargetLufsValue();
+  if (filePath) {
+    await refreshPadModalLoudness({ silent: true });
+  }
   const { color, volume, fadeIn, fadeOut, playbackSpeed, trimStart, trimEnd, gainDb, loudnessLufs, loop, retrigger } = getPadModalValues();
 
   if (ui.editingPadId) {
@@ -689,13 +782,24 @@ export async function browseAudioFiles() {
   document.getElementById('pad-filepath').value = selected;
   modalGainDb = 0;
   modalLoudnessLufs = null;
-  setPadLoudnessDisplay('Loudness: Unknown • Gain: +0.0 dB');
+  setPadLoudnessDisplay('Analyzing loudness...');
   await updatePadDurationDisplay(selected);
+  await refreshPadModalLoudness({ silent: true });
   const cur = document.getElementById('pad-label').value.trim();
   if (!cur || cur === 'New Sound') {
     const name = basename(selected).replace(/\.[^.]+$/, '');
     document.getElementById('pad-label').value = name;
   }
+}
+
+export function onPadTargetLufsInput() {
+  ui.loudnessTargetLufs = getTargetLufsValue();
+  syncProjectTargetLufsUI();
+  const modal = document.getElementById('pad-modal');
+  if (modal && !modal.hidden) {
+    schedulePadModalLoudnessRefresh();
+  }
+  queueAutosave();
 }
 
 // ── Pad playback speed sync ───────────────────────────────────

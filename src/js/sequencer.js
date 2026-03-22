@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { rt, getSeq, getPad, getEffectiveStepCrossfade } from './state.js';
-import { ensureHowl, stopPad, clearPadActive, getPadClipBounds, getEffectivePadVolume } from './audio.js';
+import { ensureHowl, stopPad, clearPadActive, getPadClipBounds, getPadBaseVolume, applyPadOutputGain } from './audio.js';
 import {
   updateSeqStepHighlight,
   updateSeqTransportUI,
@@ -64,11 +64,12 @@ export async function advanceSequencer(stepIdx, crossfadeInMs) {
 
   Howler.volume(rt.master);  // eslint-disable-line no-undef
 
-  const targetVol = getEffectivePadVolume(pad);
+  const targetVol = getPadBaseVolume(pad);
   const fadeInMs = Math.max(crossfadeInMs, pad.fadeIn * 1000);
   howl.volume(fadeInMs > 0 ? 0 : targetVol);
   const soundId = howl.play();
   howl.loop(pad.loop, soundId);
+  applyPadOutputGain(howl, soundId, pad);
   const playbackSpeed = Number.isFinite(pad.playbackSpeed) ? pad.playbackSpeed : 1.0;
   howl.rate(playbackSpeed, soundId);
 

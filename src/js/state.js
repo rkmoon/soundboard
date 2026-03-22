@@ -45,6 +45,7 @@ export const ui = {
   seqPanelOpen:  true,
   seqEditorOpen: false,
   seqPanelWidth: null,
+  loudnessTargetLufs: -16,
   themeKey:      'lsu-night',
 };
 
