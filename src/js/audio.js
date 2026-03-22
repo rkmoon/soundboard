@@ -49,10 +49,74 @@ export function getPadClipBounds(pad, totalDurationSec) {
 }
 
 export function getEffectivePadVolume(pad) {
-  const base = Number.isFinite(pad?.volume) ? pad.volume : 0.8;
+  const base = getPadBaseVolume(pad);
+  if (base <= 0) return 0;
+
   const gainDb = Number.isFinite(pad?.gainDb) ? pad.gainDb : 0;
-  const gainMul = Math.pow(10, gainDb / 20);
-  return Math.max(0, Math.min(1, base * gainMul));
+  const baseDb = 20 * Math.log10(base);
+  const effectiveDb = baseDb + gainDb;
+  const effective = Math.pow(10, effectiveDb / 20);
+
+  return clamp(effective, 0, 1);
+}
+
+export function getPadBaseVolume(pad) {
+  const base = Number.isFinite(pad?.volume) ? pad.volume : 0.8;
+  return Math.max(0, Math.min(1, base));
+}
+
+export function getPadGainMultiplier(pad) {
+  const gainDb = Number.isFinite(pad?.gainDb) ? pad.gainDb : 0;
+  return Math.max(0, Math.pow(10, gainDb / 20));
+}
+
+function ensureSoundOutputGain(howl, soundId) {
+  if (typeof Howler === 'undefined' || !Howler.usingWebAudio || !Howler.ctx || !Howler.masterGain) {
+    return null;
+  }
+  if (!howl || typeof howl._soundById !== 'function') return null;
+
+  const sound = howl._soundById(soundId);
+  const sourceGain = sound?._node;
+  if (!sound || !sourceGain || !sourceGain.gain) return null;
+
+  if (sound._outputGainSource !== sourceGain || !sound._outputGainNode) {
+    try { sourceGain.disconnect(); } catch (_) { /* ignore */ }
+    try { sound._outputGainNode?.disconnect(); } catch (_) { /* ignore */ }
+
+    const outputGain = Howler.ctx.createGain();
+    outputGain.gain.setValueAtTime(1, Howler.ctx.currentTime);
+    sourceGain.connect(outputGain);
+    outputGain.connect(Howler.masterGain);
+
+    sound._outputGainNode = outputGain;
+    sound._outputGainSource = sourceGain;
+  }
+
+  return sound._outputGainNode;
+}
+
+export function cleanupHowlOutputGainNodes(howl) {
+  if (!howl?._sounds) return;
+  howl._sounds.forEach(sound => {
+    try { sound?._outputGainNode?.disconnect(); } catch (_) { /* ignore */ }
+    if (sound) {
+      delete sound._outputGainNode;
+      delete sound._outputGainSource;
+    }
+  });
+}
+
+export function applyPadOutputGain(howl, soundId, pad) {
+  const gainMul = getPadGainMultiplier(pad);
+  const outputGain = ensureSoundOutputGain(howl, soundId);
+  if (outputGain && typeof Howler !== 'undefined' && Howler.ctx) {
+    outputGain.gain.cancelScheduledValues(Howler.ctx.currentTime);
+    outputGain.gain.setValueAtTime(gainMul, Howler.ctx.currentTime);
+    return;
+  }
+
+  howl.volume(getEffectivePadVolume(pad), soundId);
 }
 
 // ── Howler management ─────────────────────────────────────────
@@ -96,6 +160,7 @@ export async function ensureHowl(pad) {
 export function invalidateHowl(padId) {
   stopPad(padId);
   if (rt.howls[padId]) {
+    cleanupHowlOutputGainNodes(rt.howls[padId]);
     rt.howls[padId].unload();
     delete rt.howls[padId];
   }
@@ -106,6 +171,8 @@ export function invalidateHowl(padId) {
 // ── Playback ──────────────────────────────────────────────────
 
 export async function playPad(padId) {
+  if (rt.loudnessRecalcInProgress) return;
+
   const pad = getPad(padId);
   if (!pad || !pad.filePath) return;
 
@@ -125,7 +192,7 @@ export async function playPad(padId) {
 
   const totalDur = howl.duration();
   const clip = getPadClipBounds(pad, totalDur);
-  const targetVol = getEffectivePadVolume(pad);
+  const targetVol = getPadBaseVolume(pad);
   const timers = [];
   rt.active[padId] = { soundId: null, timers };
 
@@ -136,6 +203,7 @@ export async function playPad(padId) {
 
     const startVol = (pad.fadeIn > 0 && isFirstIteration) ? 0 : targetVol;
     howl.volume(startVol, soundId);
+    applyPadOutputGain(howl, soundId, pad);
     const playbackSpeed = Number.isFinite(pad.playbackSpeed) ? pad.playbackSpeed : 1.0;
     howl.rate(playbackSpeed, soundId);
     if (clip.startSec > 0) {

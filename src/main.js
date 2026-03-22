@@ -12,7 +12,7 @@ import { startProgressLoop } from './js/audio.js';
 import { stopSequencer, stopAll } from './js/sequencer.js';
 import { renderPadGrid } from './js/pad-ui.js';
 import { renderSeqList, renderSeqOverview, renderSeqSteps, updateSeqTransportUI, selectSequence, openSeqEditor } from './js/seq-ui.js';
-import { openNewPadModal, closePadModal, savePadModal, deletePad, syncPadModalDisplays, syncPadTrimDisplays, previewPadModalClip, matchPadModalLoudness, onPadWaveformPointerDown, onPadWaveformPointerMove, onPadWaveformPointerUp, openStepModal, closeStepModal, saveStepModal, updateStepModalDuration, syncSwatches, browseAudioFiles, syncPadPlaybackSpeedDisplay, onPadPlaybackSpeedChange } from './js/modals.js';
+import { openNewPadModal, closePadModal, savePadModal, deletePad, syncPadModalDisplays, syncPadTrimDisplays, previewPadModalClip, matchPadModalLoudness, onPadWaveformPointerDown, onPadWaveformPointerMove, onPadWaveformPointerUp, openStepModal, closeStepModal, saveStepModal, updateStepModalDuration, syncSwatches, browseAudioFiles, syncPadPlaybackSpeedDisplay, onPadPlaybackSpeedChange, onPadTargetLufsInput, syncProjectTargetLufsUI, resetProjectLoudnessRecalcUI } from './js/modals.js';
 import { queueAutosave, saveAutosave, loadAutosave, saveProject, openProject, newProject } from './js/persistence.js';
 
 window.addEventListener('DOMContentLoaded', () => {
@@ -27,6 +27,8 @@ window.addEventListener('DOMContentLoaded', () => {
   // -- Restore autosave ----------------------------------------
   loadAutosave();
   applyTheme(ui.themeKey);
+  syncProjectTargetLufsUI();
+  resetProjectLoudnessRecalcUI();
 
   // Migrate and normalise loaded data (fills in missing fields from older saves)
   data.pads.forEach(normalizePad);
@@ -211,9 +213,9 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 
   // -- Pad modal ------------------------------------------------
-  document.getElementById('pad-modal-close').addEventListener('click',    closePadModal);
+  document.getElementById('pad-modal-close').addEventListener('click',    savePadModal);
   document.getElementById('pad-modal-cancel').addEventListener('click',   closePadModal);
-  document.getElementById('pad-modal-backdrop').addEventListener('click', closePadModal);
+  document.getElementById('pad-modal-backdrop').addEventListener('click', savePadModal);
   document.getElementById('pad-modal-save').addEventListener('click',     savePadModal);
   document.getElementById('pad-modal-delete').addEventListener('click', () => {
     if (ui.editingPadId && confirm('Delete this sound?')) deletePad(ui.editingPadId);
@@ -226,6 +228,7 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('pad-playback-speed').addEventListener('input', onPadPlaybackSpeedChange);
   document.getElementById('pad-trim-start').addEventListener('input', syncPadTrimDisplays);
   document.getElementById('pad-trim-end').addEventListener('input', syncPadTrimDisplays);
+  document.getElementById('pad-target-lufs').addEventListener('input', onPadTargetLufsInput);
   document.getElementById('btn-preview-clip').addEventListener('click', previewPadModalClip);
   document.getElementById('btn-match-loudness').addEventListener('click', matchPadModalLoudness);
   const waveformCanvas = document.getElementById('pad-waveform');
