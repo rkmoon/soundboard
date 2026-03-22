@@ -27,6 +27,7 @@ export const rt = {            // runtime only
   howls:      {},              // padId → Howl
   active:     {},              // padId → { soundId, timers[] }
   padDurSec:  {},              // padId → duration seconds
+  loudnessRecalcInProgress: false,
   master:     1.0,
   seqState:   'idle',          // 'idle' | 'playing'
   seqId:      null,

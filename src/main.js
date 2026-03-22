@@ -12,7 +12,7 @@ import { startProgressLoop } from './js/audio.js';
 import { stopSequencer, stopAll } from './js/sequencer.js';
 import { renderPadGrid } from './js/pad-ui.js';
 import { renderSeqList, renderSeqOverview, renderSeqSteps, updateSeqTransportUI, selectSequence, openSeqEditor } from './js/seq-ui.js';
-import { openNewPadModal, closePadModal, savePadModal, deletePad, syncPadModalDisplays, syncPadTrimDisplays, previewPadModalClip, matchPadModalLoudness, onPadWaveformPointerDown, onPadWaveformPointerMove, onPadWaveformPointerUp, openStepModal, closeStepModal, saveStepModal, updateStepModalDuration, syncSwatches, browseAudioFiles, syncPadPlaybackSpeedDisplay, onPadPlaybackSpeedChange, onPadTargetLufsInput, syncProjectTargetLufsUI } from './js/modals.js';
+import { openNewPadModal, closePadModal, savePadModal, deletePad, syncPadModalDisplays, syncPadTrimDisplays, previewPadModalClip, matchPadModalLoudness, onPadWaveformPointerDown, onPadWaveformPointerMove, onPadWaveformPointerUp, openStepModal, closeStepModal, saveStepModal, updateStepModalDuration, syncSwatches, browseAudioFiles, syncPadPlaybackSpeedDisplay, onPadPlaybackSpeedChange, onPadTargetLufsInput, syncProjectTargetLufsUI, resetProjectLoudnessRecalcUI } from './js/modals.js';
 import { queueAutosave, saveAutosave, loadAutosave, saveProject, openProject, newProject } from './js/persistence.js';
 
 window.addEventListener('DOMContentLoaded', () => {
@@ -28,6 +28,7 @@ window.addEventListener('DOMContentLoaded', () => {
   loadAutosave();
   applyTheme(ui.themeKey);
   syncProjectTargetLufsUI();
+  resetProjectLoudnessRecalcUI();
 
   // Migrate and normalise loaded data (fills in missing fields from older saves)
   data.pads.forEach(normalizePad);

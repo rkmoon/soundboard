@@ -50,8 +50,14 @@ export function getPadClipBounds(pad, totalDurationSec) {
 
 export function getEffectivePadVolume(pad) {
   const base = getPadBaseVolume(pad);
-  const gainMul = getPadGainMultiplier(pad);
-  return Math.max(0, Math.min(1, base * gainMul));
+  if (base <= 0) return 0;
+
+  const gainDb = Number.isFinite(pad?.gainDb) ? pad.gainDb : 0;
+  const baseDb = 20 * Math.log10(base);
+  const effectiveDb = baseDb + gainDb;
+  const effective = Math.pow(10, effectiveDb / 20);
+
+  return clamp(effective, 0, 1);
 }
 
 export function getPadBaseVolume(pad) {
@@ -165,6 +171,8 @@ export function invalidateHowl(padId) {
 // ── Playback ──────────────────────────────────────────────────
 
 export async function playPad(padId) {
+  if (rt.loudnessRecalcInProgress) return;
+
   const pad = getPad(padId);
   if (!pad || !pad.filePath) return;
 

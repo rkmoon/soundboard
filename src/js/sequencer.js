@@ -14,6 +14,8 @@ import {
 // ── Public transport commands ─────────────────────────────────
 
 export async function playSequence(seqId) {
+  if (rt.loudnessRecalcInProgress) return;
+
   stopSequencer();
   const seq = getSeq(seqId);
   if (!seq || seq.steps.length === 0) return;

@@ -26,6 +26,21 @@ let modalGainDb = 0;
 let modalLoudnessLufs = null;
 let modalLoudnessTimer = null;
 let modalLoudnessRunId = 0;
+let projectLoudnessTimer = null;
+let projectLoudnessRunId = 0;
+const PROJECT_LOUDNESS_PARALLELISM = 4;
+
+function setProjectLoudnessRecalcState(inProgress, message = 'Recalculating loudness...') {
+  rt.loudnessRecalcInProgress = !!inProgress;
+
+  const indicator = document.getElementById('loudness-recalc-indicator');
+  if (indicator) {
+    indicator.hidden = !inProgress;
+    indicator.textContent = message;
+  }
+
+  document.body.classList.toggle('loudness-recalc-busy', !!inProgress);
+}
 
 const waveformAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
@@ -67,6 +82,13 @@ export function syncProjectTargetLufsUI() {
   updateTargetLufsInput();
 }
 
+export function resetProjectLoudnessRecalcUI() {
+  clearTimeout(projectLoudnessTimer);
+  projectLoudnessTimer = null;
+  projectLoudnessRunId += 1;
+  setProjectLoudnessRecalcState(false);
+}
+
 function analyzeLoudnessMatch(buffer, trimStart, trimEnd, targetLufs) {
   if (!buffer) return null;
   const clip = getPadClipBounds({ trimStart, trimEnd }, buffer.duration);
@@ -95,6 +117,89 @@ async function applyLoudnessMatchToPad(pad, targetLufs = (Number.isFinite(ui.lou
     pad.gainDb = 0;
     return null;
   }
+}
+
+function applyPadLoudnessIfPlaying(pad) {
+  const entry = rt.active[pad?.id];
+  const howl = rt.howls[pad?.id];
+  if (!pad || !entry || !howl || entry.soundId == null) return;
+  applyPadOutputGain(howl, entry.soundId, pad);
+}
+
+async function recomputeProjectLoudnessForAllPads(targetLufs, runId) {
+  const pads = data.pads.filter(pad => !!pad?.filePath);
+  const total = pads.length;
+
+  if (runId !== projectLoudnessRunId) return;
+
+  if (total === 0) {
+    setProjectLoudnessRecalcState(false);
+    return;
+  }
+
+  setProjectLoudnessRecalcState(true, `Recalculating loudness... 0/${total}`);
+  let done = 0;
+  let nextIndex = 0;
+
+  try {
+    const workerCount = Math.min(PROJECT_LOUDNESS_PARALLELISM, total);
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (true) {
+        if (runId !== projectLoudnessRunId) return;
+
+        const idx = nextIndex;
+        nextIndex += 1;
+        if (idx >= total) return;
+
+        const pad = pads[idx];
+        await applyLoudnessMatchToPad(pad, targetLufs);
+        applyPadLoudnessIfPlaying(pad);
+
+        done += 1;
+        if (runId === projectLoudnessRunId) {
+          setProjectLoudnessRecalcState(true, `Recalculating loudness... ${done}/${total}`);
+        }
+      }
+    });
+
+    await Promise.all(workers);
+
+    if (runId !== projectLoudnessRunId) return;
+
+    renderPadGrid();
+    queueAutosave();
+
+    const modal = document.getElementById('pad-modal');
+    if (modal && !modal.hidden) {
+      schedulePadModalLoudnessRefresh();
+    }
+  } finally {
+    if (runId === projectLoudnessRunId) {
+      setProjectLoudnessRecalcState(false);
+    }
+  }
+}
+
+function scheduleProjectLoudnessRecompute(targetLufs) {
+  clearTimeout(projectLoudnessTimer);
+  const runId = ++projectLoudnessRunId;
+  const total = data.pads.filter(pad => !!pad?.filePath).length;
+  if (total <= 0) {
+    setProjectLoudnessRecalcState(false);
+    return;
+  }
+
+  setProjectLoudnessRecalcState(true, `Recalculating loudness... 0/${total}`);
+  projectLoudnessTimer = setTimeout(() => {
+    projectLoudnessTimer = null;
+    recomputeProjectLoudnessForAllPads(targetLufs, runId)
+      .catch(error => {
+        console.error('Failed project loudness recompute:', error);
+        if (runId === projectLoudnessRunId) {
+          setProjectLoudnessRecalcState(false);
+        }
+      });
+  }, 220);
 }
 
 async function refreshPadModalLoudness(options = {}) {
@@ -793,12 +898,14 @@ export async function browseAudioFiles() {
 }
 
 export function onPadTargetLufsInput() {
-  ui.loudnessTargetLufs = getTargetLufsValue();
+  const targetLufs = getTargetLufsValue();
+  ui.loudnessTargetLufs = targetLufs;
   syncProjectTargetLufsUI();
   const modal = document.getElementById('pad-modal');
   if (modal && !modal.hidden) {
     schedulePadModalLoudnessRefresh();
   }
+  scheduleProjectLoudnessRecompute(targetLufs);
   queueAutosave();
 }
 
