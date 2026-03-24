@@ -44,23 +44,35 @@
       </select>
     </div>
 
+    <div class="header-pad-size">
+      <label for="pad-size-slider" class="master-label">Pad Size</label>
+      <div class="header-pad-size-control">
+        <input type="range" id="pad-size-slider" class="slider header-pad-size-slider" min="70" max="130" step="1" value="100" aria-label="Resize pad cards" />
+        <span id="pad-size-display" class="header-pad-size-value">100%</span>
+        <div class="header-pad-size-presets" role="group" aria-label="Pad size presets">
+          <button id="btn-pad-size-dense" class="btn btn-ghost btn-sm" type="button">Small</button>
+          <button id="btn-pad-size-default" class="btn btn-ghost btn-sm" type="button">Default</button>
+          <button id="btn-pad-size-touch" class="btn btn-ghost btn-sm" type="button">Large</button>
+        </div>
+      </div>
+    </div>
+
     <div class="header-loudness">
-      <label for="pad-target-lufs" class="master-label tooltip-label" title="LUFS measures perceived loudness. The target sets the level imported and edited sounds are matched toward, and gain is adjusted up or down to get closer to that loudness.">Project Target LUFS</label>
+      <div class="header-loudness-copy">
+        <label for="pad-target-lufs" class="master-label">Project Target LUFS</label>
+        <small class="header-inline-help">Matches imported and edited sounds toward one loudness target.</small>
+      </div>
       <div class="header-loudness-control">
         <input type="range" id="pad-target-lufs" class="slider header-lufs-slider" value="-16" min="-36" max="-6" step="0.5" />
         <span id="pad-target-lufs-display" class="header-lufs-value">-16.0 LUFS</span>
       </div>
     </div>
 
+    <div id="pointer-coarse-indicator" class="header-pointer-status" aria-live="polite">Pointer: fine</div>
+
+    <button id="btn-tablet-mode" class="btn btn-ghost" aria-pressed="false" title="Force touch-friendly sizing on this device">Tablet Mode: Off</button>
+
     <div id="loudness-recalc-indicator" class="header-recalc" hidden aria-live="polite">Recalculating loudness...</div>
-
-    <div class="header-master">
-      <span class="master-label">Master</span>
-      <input type="range" id="master-volume" class="slider" min="0" max="100" value="100" />
-      <span id="master-volume-val" class="master-vol-val">100%</span>
-    </div>
-
-    <button id="btn-stop-all" class="btn btn-danger" title="Stop all sounds">Stop All</button>
   </header>
 
   <main id="app-workspace" class="app-workspace seq-open">
@@ -91,6 +103,10 @@
         <div id="seq-editor" class="seq-editor" hidden>
           <div class="seq-editor-topbar">
             <input id="seq-name-input" class="seq-name-input" type="text" placeholder="Sequence name…" />
+            <button id="btn-close-seq-editor" class="btn btn-danger btn-icon seq-close-editor-btn" title="Close sequence editor" aria-label="Close sequence editor">
+              <span class="seq-close-editor-x" aria-hidden="true">X</span>
+              <span>Close Editor</span>
+            </button>
             <button id="btn-delete-seq" class="btn btn-ghost btn-icon" title="Delete sequence">Delete Sequence</button>
           </div>
 
@@ -114,13 +130,29 @@
 
           <ul id="seq-steps" class="seq-steps-list"></ul>
 
-          <button id="btn-add-step" class="btn btn-ghost btn-sm seq-add-step-btn">Add Step</button>
+          <div class="seq-step-actions">
+            <button id="btn-add-step" class="btn btn-ghost btn-sm seq-add-step-btn">Add Step</button>
+            <button id="btn-add-silence" class="btn btn-ghost btn-sm seq-add-step-btn" title="Add a silence/pause step">Add Silence</button>
+          </div>
         </div>
       </section>
 
       </div>
     </aside>
   </main>
+
+  <footer class="app-footer" aria-label="Global controls">
+    <div class="footer-actions">
+      <button id="btn-stop-all" class="btn btn-danger btn-panic" title="Stop all sounds">Stop All</button>
+      <button id="btn-pad-reorder" class="btn btn-ghost" title="Enable touch drag reordering" aria-pressed="false">Reorder Pads: Off</button>
+    </div>
+
+    <div class="footer-master">
+      <span class="master-label">Master</span>
+      <input type="range" id="master-volume" class="slider" min="0" max="100" value="100" />
+      <span id="master-volume-val" class="master-vol-val">100%</span>
+    </div>
+  </footer>
 
   <!-- ═══════ PAD EDIT MODAL ═══════ -->
   <div id="pad-modal" class="modal" hidden>
@@ -163,7 +195,7 @@
         <div class="form-group">
           <label>Waveform Trim Editor</label>
           <canvas id="pad-waveform" class="pad-waveform" width="720" height="120" aria-label="Waveform trim editor"></canvas>
-          <small class="field-help">Drag the left and right handles to set clip start and end.</small>
+          <small class="field-help">Touch or click near a yellow handle, then drag to set clip start and end.</small>
         </div>
 
         <div class="form-group">
@@ -254,15 +286,29 @@
 
       <div class="modal-body">
         <div class="form-group">
-          <label for="step-pad-select">Sound</label>
+          <label for="step-pad-select">Sound or Silence</label>
           <select id="step-pad-select" class="form-select"></select>
           <small id="step-pad-duration" class="field-help">Length: Unknown</small>
         </div>
-        <div class="form-group">
-          <label for="step-duration">Play Duration <small>(seconds — leave blank for full length)</small></label>
+        <div id="step-duration-group" class="form-group">
+          <label for="step-duration">Play Duration <small>(seconds — leave blank for full length, or set pause length for silence)</small></label>
           <input type="number" id="step-duration" class="form-input" min="0.1" step="0.5" placeholder="Full length" />
         </div>
-        <div class="form-group">
+        <div id="step-silence-controls" class="form-group" hidden>
+          <label for="step-silence-duration-slider">Pause Length</label>
+          <div class="step-silence-duration-row">
+            <input type="range" id="step-silence-duration-slider" class="slider step-silence-slider" min="0.5" max="30" step="0.5" value="1" />
+            <span id="step-silence-duration-display" class="step-silence-duration-value">1.0 s</span>
+          </div>
+          <div class="step-silence-presets" role="group" aria-label="Silence duration presets">
+            <button id="btn-step-silence-1" class="btn btn-ghost btn-sm" type="button">1s</button>
+            <button id="btn-step-silence-2" class="btn btn-ghost btn-sm" type="button">2s</button>
+            <button id="btn-step-silence-5" class="btn btn-ghost btn-sm" type="button">5s</button>
+            <button id="btn-step-silence-10" class="btn btn-ghost btn-sm" type="button">10s</button>
+          </div>
+          <small class="field-help">Use the slider or presets to set pause duration quickly on touch.</small>
+        </div>
+        <div id="step-crossfade-group" class="form-group">
           <label for="step-crossfade">Crossfade into Next <small>(seconds, uses sequence default unless overridden)</small></label>
           <input type="number" id="step-crossfade" class="form-input" min="0" step="0.5" value="0" />
         </div>
@@ -272,6 +318,28 @@
         <div class="modal-ftr-right">
           <button id="step-modal-cancel" class="btn btn-ghost">Cancel</button>
           <button id="step-modal-save"   class="btn btn-accent">Add Step</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════ CONFIRM MODAL ═══════ -->
+  <div id="confirm-modal" class="modal" hidden>
+    <div class="modal-backdrop" id="confirm-modal-backdrop"></div>
+    <div class="modal-dialog modal-sm confirm-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+      <div class="modal-hdr">
+        <h2 id="confirm-title">Confirm Action</h2>
+        <button class="modal-close-btn" id="confirm-modal-close" aria-label="Close confirmation">&#215;</button>
+      </div>
+
+      <div class="modal-body">
+        <p id="confirm-message" class="confirm-message">Are you sure?</p>
+      </div>
+
+      <div class="modal-ftr">
+        <div class="modal-ftr-right">
+          <button id="confirm-modal-cancel" class="btn btn-ghost" type="button">Cancel</button>
+          <button id="confirm-modal-confirm" class="btn btn-danger" type="button">Delete</button>
         </div>
       </div>
     </div>

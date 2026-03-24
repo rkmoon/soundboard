@@ -6,6 +6,7 @@ import {
   data, rt, ui,
   getPad, makePad, makeStep, getSeq,
   randomColor, basename,
+  SILENCE_STEP_PAD_ID,
   sliderToVol, sliderToSec,
   formatSec, dialogOpen, invoke,
 } from './state.js';
@@ -29,6 +30,24 @@ let modalLoudnessRunId = 0;
 let projectLoudnessTimer = null;
 let projectLoudnessRunId = 0;
 const PROJECT_LOUDNESS_PARALLELISM = 4;
+const WAVEFORM_HANDLE_HIT_PX_MOUSE = 16;
+const WAVEFORM_HANDLE_HIT_PX_TOUCH = 28;
+const SILENCE_STEP_DEFAULT_DURATION_SEC = 1;
+
+function formatSilenceDurationLabel(durationSec) {
+  const safe = Math.max(0.5, Math.min(30, Number(durationSec) || SILENCE_STEP_DEFAULT_DURATION_SEC));
+  return `${safe.toFixed(1)} s`;
+}
+
+function syncSilenceDurationControls(durationSec) {
+  const safe = Math.max(0.5, Math.min(30, Number(durationSec) || SILENCE_STEP_DEFAULT_DURATION_SEC));
+  const slider = document.getElementById('step-silence-duration-slider');
+  const display = document.getElementById('step-silence-duration-display');
+  const durationInput = document.getElementById('step-duration');
+  if (slider) slider.value = String(safe);
+  if (display) display.textContent = formatSilenceDurationLabel(safe);
+  if (durationInput) durationInput.value = String(safe);
+}
 
 function setProjectLoudnessRecalcState(inProgress, message = 'Recalculating loudness...') {
   rt.loudnessRecalcInProgress = !!inProgress;
@@ -354,6 +373,20 @@ function renderPadWaveform() {
   ctx.fillStyle = '#fdd023';
   ctx.fillRect(startX - 2, 0, 4, height);
   ctx.fillRect(endX - 2, 0, 4, height);
+
+  const handleRadius = Math.max(8, Math.min(12, height * 0.12));
+  const handleY = height / 2;
+  ctx.save();
+  ctx.fillStyle = '#fdd023';
+  ctx.strokeStyle = '#111827';
+  ctx.lineWidth = 1.2;
+  [startX, endX].forEach(x => {
+    ctx.beginPath();
+    ctx.arc(x, handleY, handleRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  });
+  ctx.restore();
 }
 
 async function ensureModalWaveform(filePath) {
@@ -411,6 +444,7 @@ function setTrimFromWaveformX(clientX, mode) {
 export function onPadWaveformPointerDown(event) {
   const canvas = document.getElementById('pad-waveform');
   if (!canvas || !Number.isFinite(modalAudioDurationSec) || modalAudioDurationSec <= 0) return;
+  event.preventDefault();
 
   const rect = canvas.getBoundingClientRect();
   const { trimStart, trimEnd } = getTrimTimesFromInputs();
@@ -419,14 +453,22 @@ export function onPadWaveformPointerDown(event) {
   const endX = rect.left + (clip.endSec / modalAudioDurationSec) * rect.width;
   const distStart = Math.abs(event.clientX - startX);
   const distEnd = Math.abs(event.clientX - endX);
+  const isTouchLike = event.pointerType === 'touch' || event.pointerType === 'pen';
+  const hitRadius = isTouchLike ? WAVEFORM_HANDLE_HIT_PX_TOUCH : WAVEFORM_HANDLE_HIT_PX_MOUSE;
 
-  waveformDragMode = distStart <= distEnd ? 'start' : 'end';
+  if (distStart <= hitRadius || distEnd <= hitRadius) {
+    waveformDragMode = distStart <= distEnd ? 'start' : 'end';
+  } else {
+    const centerX = rect.left + ((clip.startSec + clip.endSec) / 2 / modalAudioDurationSec) * rect.width;
+    waveformDragMode = event.clientX < centerX ? 'start' : 'end';
+  }
   setTrimFromWaveformX(event.clientX, waveformDragMode);
   try { canvas.setPointerCapture(event.pointerId); } catch (_) { /* ignore */ }
 }
 
 export function onPadWaveformPointerMove(event) {
   if (!waveformDragMode) return;
+  event.preventDefault();
   setTrimFromWaveformX(event.clientX, waveformDragMode);
 }
 
@@ -800,24 +842,26 @@ export function deletePad(padId) {
 
 // ── Step modal ────────────────────────────────────────────────
 
-export function openStepModal() {
+export function openStepModal(initialPadId = null) {
   const sel = document.getElementById('step-pad-select');
   const seq = getSeq(ui.currentSeqId);
   sel.innerHTML = '';
+  const silenceOpt = document.createElement('option');
+  silenceOpt.value = SILENCE_STEP_PAD_ID;
+  silenceOpt.textContent = 'Silence / Pause';
+  sel.appendChild(silenceOpt);
   data.pads.forEach(pad => {
     const opt       = document.createElement('option');
     opt.value       = pad.id;
     opt.textContent = pad.label;
     sel.appendChild(opt);
   });
-  if (data.pads.length === 0) {
-    const opt       = document.createElement('option');
-    opt.textContent = 'No sounds added yet';
-    opt.disabled    = true;
-    sel.appendChild(opt);
-  }
   document.getElementById('step-duration').value  = '';
   document.getElementById('step-crossfade').value = '';
+  syncSilenceDurationControls(SILENCE_STEP_DEFAULT_DURATION_SEC);
+  if (initialPadId && sel.querySelector(`option[value="${initialPadId}"]`)) {
+    sel.value = initialPadId;
+  }
   document.getElementById('step-crossfade').placeholder = seq
     ? `Default ${seq.defaultCrossfade.toFixed(1)} s`
     : 'Default';
@@ -828,21 +872,57 @@ export function openStepModal() {
 export async function updateStepModalDuration() {
   const sel   = document.getElementById('step-pad-select');
   const label = document.getElementById('step-pad-duration');
+  const durationInput = document.getElementById('step-duration');
+  const durationGroup = document.getElementById('step-duration-group');
+  const crossfadeGroup = document.getElementById('step-crossfade-group');
+  const silenceControls = document.getElementById('step-silence-controls');
   const seq   = getSeq(ui.currentSeqId);
+  if (!label) return;
+
+  if (sel.value === SILENCE_STEP_PAD_ID) {
+    label.textContent = 'Silence: set a pause duration';
+    if (durationGroup) durationGroup.hidden = true;
+    if (crossfadeGroup) crossfadeGroup.hidden = true;
+    if (silenceControls) silenceControls.hidden = false;
+
+    const current = Number(durationInput?.value);
+    syncSilenceDurationControls(Number.isFinite(current) && current > 0 ? current : SILENCE_STEP_DEFAULT_DURATION_SEC);
+
+    if (durationInput) durationInput.placeholder = 'Pause length';
+    const cf = document.getElementById('step-crossfade');
+    if (cf) cf.placeholder = 'Unused for silence';
+    return;
+  }
+
+  if (durationGroup) durationGroup.hidden = false;
+  if (crossfadeGroup) crossfadeGroup.hidden = false;
+  if (silenceControls) silenceControls.hidden = true;
+
   const pad   = getPad(sel.value);
-  if (!pad || !label) {
-    if (label) label.textContent = 'Length: Unknown';
+  if (!pad) {
+    label.textContent = 'Length: Unknown';
     return;
   }
   label.textContent = 'Length: Loading...';
   const dur = await getPadDurationSec(pad);
   label.textContent = 'Length: ' + formatSec(dur);
+  if (durationInput) durationInput.placeholder = 'Full length';
 
   const cf = document.getElementById('step-crossfade');
   if (cf) {
     const seqDefault = seq ? seq.defaultCrossfade : 0;
     cf.placeholder = `Default ${seqDefault.toFixed(1)} s`;
   }
+}
+
+export function onStepSilenceDurationInput() {
+  const slider = document.getElementById('step-silence-duration-slider');
+  if (!slider) return;
+  syncSilenceDurationControls(slider.value);
+}
+
+export function setStepSilenceDurationPreset(durationSec) {
+  syncSilenceDurationControls(durationSec);
 }
 
 export function closeStepModal() {
@@ -853,8 +933,13 @@ export function saveStepModal() {
   const padId    = document.getElementById('step-pad-select').value;
   const durVal   = document.getElementById('step-duration').value.trim();
   const cfVal    = document.getElementById('step-crossfade').value.trim();
-  const duration  = durVal === '' ? null : parseFloat(durVal);
-  const crossfade = cfVal  === '' ? null : Math.max(0, parseFloat(cfVal) || 0);
+  const isSilence = padId === SILENCE_STEP_PAD_ID;
+  const duration  = isSilence
+    ? Math.max(0.1, durVal === '' ? 1 : (parseFloat(durVal) || 1))
+    : (durVal === '' ? null : parseFloat(durVal));
+  const crossfade = isSilence
+    ? null
+    : (cfVal === '' ? null : Math.max(0, parseFloat(cfVal) || 0));
 
   const seq = getSeq(ui.currentSeqId);
   if (!seq || !padId) return;

@@ -12,6 +12,7 @@ import {
   data, rt, ui,
   getSeq, getPad, makeStep,
   getEffectiveStepCrossfade,
+  SILENCE_STEP_PAD_ID,
   escHtml,
   sliderToSec, sliderToDurationSec, durationSecToSlider,
   formatDurationClock,
@@ -20,6 +21,10 @@ import { setSequencerPanelOpen, setSequenceEditorOpen, syncSeqDefaultCrossfadeUI
 import { hydratePadDuration, getPadDurationSec, getPadClipBounds } from './audio.js';
 import { queueAutosave } from './persistence.js';
 import { stopSequencer, playSequence } from './sequencer.js';
+
+const STEP_DRAG_MOUSE_DISTANCE_PX = 4;
+const STEP_DRAG_TOUCH_DISTANCE_PX = 12;
+const STEP_DRAG_TOUCH_HOLD_MS = 140;
 
 // ── Sequence list ─────────────────────────────────────────────
 
@@ -176,15 +181,20 @@ export function renderSeqSteps() {
 
   seq.steps.forEach((step, idx) => {
     const pad = getPad(step.padId);
+    const isSilence = step.padId === SILENCE_STEP_PAD_ID;
     const li  = document.createElement('li');
     li.className = 'seq-step-row' + (idx === rt.seqStep && rt.seqId === ui.currentSeqId ? ' playing-step' : '');
     li.dataset.stepId = step.id;
 
-    const colorDot  = pad ? `<span class="step-color-dot" style="background:${pad.color}"></span>` : '';
-    const soundName = pad ? escHtml(pad.label) : '<em>Unknown</em>';
-    const soundDur  = pad
+    const colorDot  = isSilence
+      ? '<span class="step-silence-dot" aria-hidden="true"></span>'
+      : (pad ? `<span class="step-color-dot" style="background:${pad.color}"></span>` : '');
+    const soundName = isSilence ? 'Silence' : (pad ? escHtml(pad.label) : '<em>Unknown</em>');
+    const soundDur  = isSilence
+      ? `${Math.max(0.1, step.duration || 1).toFixed(1)} s pause`
+      : (pad
       ? (formatDurationClock(Number.isFinite(rt.padDurSec[pad.id]) ? getPadClipBounds(pad, rt.padDurSec[pad.id]).playSec : rt.padDurSec[pad.id]) || '--.---')
-      : '';
+      : '');
     const durVal    = step.duration != null ? step.duration : '';
     const hasOverride = step.crossfadeNext != null;
     const cfVal     = hasOverride ? step.crossfadeNext : '';
@@ -219,10 +229,13 @@ export function renderSeqSteps() {
 
       stepDrag = {
         pointerId:    e.pointerId,
+        pointerType:  e.pointerType || 'mouse',
+        isTouchLike:  e.pointerType === 'touch' || e.pointerType === 'pen',
         sourceStepId: step.id,
         sourceEl:     li,
         startX:       e.clientX,
         startY:       e.clientY,
+        startAtMs:    performance.now(),
         started:      false,
         targetStepId: null,
         position:     'after',
@@ -235,7 +248,9 @@ export function renderSeqSteps() {
 
       if (!stepDrag.started) {
         const dist = Math.hypot(e.clientX - stepDrag.startX, e.clientY - stepDrag.startY);
-        if (dist < 4) return;
+        const minDist = stepDrag.isTouchLike ? STEP_DRAG_TOUCH_DISTANCE_PX : STEP_DRAG_MOUSE_DISTANCE_PX;
+        if (dist < minDist) return;
+        if (stepDrag.isTouchLike && (performance.now() - stepDrag.startAtMs) < STEP_DRAG_TOUCH_HOLD_MS) return;
         stepDrag.started = true;
         li.classList.add('dragging');
       }

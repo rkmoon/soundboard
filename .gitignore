@@ -24,3 +24,9 @@ target/
 
 # Rust/Cargo local override (keep Cargo.lock for app projects)
 **/*.rs.bk
+
+# Local Copilot customizations
+.github/agents/
+.github/copilot-instructions.md
+.github/instructions/
+.github/prompts/

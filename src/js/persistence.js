@@ -10,6 +10,7 @@ import {
 } from './state.js';
 import { stopAll } from './sequencer.js';
 import { renderPadGrid } from './pad-ui.js';
+import { showConfirmDialog } from './dialogs.js';
 import {
   renderSeqList,
   renderSeqOverview,
@@ -38,6 +39,9 @@ export function saveAutosave() {
       currentSeqId:  ui.currentSeqId,
       seqPanelOpen:  !!ui.seqPanelOpen,
       seqEditorOpen: !!ui.seqEditorOpen,
+      padReorderMode: !!ui.padReorderMode,
+      padSizePercent: Number.isFinite(ui.padSizePercent) ? ui.padSizePercent : 100,
+      tabletMode: !!ui.tabletMode,
       seqPanelWidth: Number.isFinite(ui.seqPanelWidth) ? ui.seqPanelWidth : null,
       loudnessTargetLufs: Number.isFinite(ui.loudnessTargetLufs) ? ui.loudnessTargetLufs : -16,
       themeKey: typeof ui.themeKey === 'string' ? ui.themeKey : 'lsu-night',
@@ -66,6 +70,11 @@ export function loadAutosave() {
     ui.currentSeqId  = typeof savedUi.currentSeqId  === 'string'  ? savedUi.currentSeqId  : null;
     ui.seqPanelOpen  = typeof savedUi.seqPanelOpen  === 'boolean' ? savedUi.seqPanelOpen  : true;
     ui.seqEditorOpen = typeof savedUi.seqEditorOpen === 'boolean' ? savedUi.seqEditorOpen : false;
+    ui.padReorderMode = typeof savedUi.padReorderMode === 'boolean' ? savedUi.padReorderMode : false;
+    ui.padSizePercent = Number.isFinite(savedUi.padSizePercent)
+      ? Math.max(70, Math.min(130, savedUi.padSizePercent))
+      : 100;
+    ui.tabletMode = typeof savedUi.tabletMode === 'boolean' ? savedUi.tabletMode : false;
     ui.seqPanelWidth = Number.isFinite(savedUi.seqPanelWidth)     ? savedUi.seqPanelWidth : null;
     ui.loudnessTargetLufs = Number.isFinite(savedUi.loudnessTargetLufs)
       ? Math.max(-36, Math.min(-6, savedUi.loudnessTargetLufs))
@@ -128,8 +137,15 @@ export async function openProject() {
   }
 }
 
-export function newProject() {
-  if (!confirm('Start a new project? Unsaved changes will be lost.')) return;
+export async function newProject() {
+  const confirmed = await showConfirmDialog({
+    title: 'Start New Project',
+    message: 'Start a new project? Unsaved changes will be lost.',
+    confirmText: 'Start New Project',
+    cancelText: 'Keep Current Project',
+    danger: true,
+  });
+  if (!confirmed) return;
   stopAll();
   Object.values(rt.howls).forEach(h => h.unload());
   rt.howls  = {};
