@@ -154,7 +154,22 @@ jobs:
             echo "No Xcode project found in src-tauri/gen/apple" >&2
             exit 1
           fi
-          SCHEME=$(basename "$XCODEPROJ" .xcodeproj)
+
+          # Discover the actual scheme name from the project rather than assuming
+          # it matches the filename — Tauri-generated projects may differ.
+          echo "Available schemes in $XCODEPROJ:"
+          xcodebuild -list -project "$XCODEPROJ" 2>&1 || true
+          SCHEME=$(xcodebuild -list -project "$XCODEPROJ" 2>/dev/null \
+            | awk '/Schemes:/,0' \
+            | grep -v 'Schemes:' \
+            | grep -v '^$' \
+            | head -n 1 \
+            | xargs)
+          if [[ -z "$SCHEME" ]]; then
+            echo "Could not determine scheme from $XCODEPROJ" >&2
+            exit 1
+          fi
+          echo "Using scheme: $SCHEME"
           BUILD_DIR="$(pwd)/artifacts/ios/build"
           mkdir -p "$BUILD_DIR"
 
