@@ -11,7 +11,7 @@
 //  function bodies, not at module initialisation time.
 // ═══════════════════════════════════════════════════════════════
 
-import { rt, getPad, invoke } from './state.js';
+import { rt, ui, getPad, invoke } from './state.js';
 import {
   updatePadDurationInCard,
   setPadLoading,
@@ -171,6 +171,7 @@ export function invalidateHowl(padId) {
 // ── Playback ──────────────────────────────────────────────────
 
 export async function playPad(padId) {
+  if (ui.padReorderMode) return;
   if (rt.loudnessRecalcInProgress) return;
 
   const pad = getPad(padId);

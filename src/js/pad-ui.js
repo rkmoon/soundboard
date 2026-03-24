@@ -18,8 +18,13 @@ import {
 } from './state.js';
 import { playPad, hydratePadDuration, getPadClipBounds } from './audio.js';
 import { insertPadIntoSequence } from './seq-ui.js';
-import { openPadModal } from './modals.js';
+import { openPadModal, deletePad } from './modals.js';
 import { queueAutosave } from './persistence.js';
+import { showConfirmDialog } from './dialogs.js';
+
+const PAD_DRAG_MOUSE_DISTANCE_PX = 3;
+const PAD_DRAG_TOUCH_DISTANCE_PX = 12;
+const PAD_DRAG_TOUCH_HOLD_MS = 160;
 
 // ── Grid rendering ────────────────────────────────────────────
 
@@ -283,7 +288,10 @@ export function buildPadCard(pad) {
     <div class="pad-color-bar"></div>
     <div class="pad-header">
       <div class="pad-status"></div>
-      <button class="pad-settings-btn" title="Edit sound">Settings</button>
+      <div class="pad-header-actions">
+        <button class="pad-delete-btn" title="Delete sound" aria-label="Delete sound">Delete</button>
+        <button class="pad-settings-btn" title="Edit sound">Settings</button>
+      </div>
     </div>
     <div class="pad-play-body" role="button" tabindex="0" aria-label="Play sound">
       <div class="pad-progress"></div>
@@ -319,17 +327,26 @@ export function buildPadCard(pad) {
   `;
 
   // Drag-to-reorder — only from non-interactive regions
-  const interactiveSelector = '.pad-play-body, .pad-settings-btn, .pad-toggle-btn, .pad-vol-slider, .pad-fi-slider, .pad-fo-slider, input, button, select, [role="button"]';
+  const interactiveSelector = '.pad-play-body, .pad-settings-btn, .pad-delete-btn, .pad-toggle-btn, .pad-vol-slider, .pad-fi-slider, .pad-fo-slider, input, button, select, [role="button"]';
 
   div.addEventListener('pointerdown', e => {
     if (e.button !== 0) { ui.padDrag = null; return; }
-    if (e.target.closest(interactiveSelector)) { ui.padDrag = null; return; }
+    if (!ui.padReorderMode) {
+      if (e.target.closest(interactiveSelector)) { ui.padDrag = null; return; }
+      ui.padDrag = null;
+      return;
+    }
+    const pointerType = e.pointerType || 'mouse';
+    const isTouchLike = pointerType === 'touch' || pointerType === 'pen';
     ui.padDrag = {
       sourceId:  pad.id,
       sourceEl:  div,
       pointerId: e.pointerId,
+      pointerType,
       startX:    e.clientX,
       startY:    e.clientY,
+      startAtMs: performance.now(),
+      isTouchLike,
       started:   false,
       offsetX:   0,
       offsetY:   0,
@@ -344,7 +361,9 @@ export function buildPadCard(pad) {
 
     if (!ui.padDrag.started) {
       const dist = Math.hypot(e.clientX - ui.padDrag.startX, e.clientY - ui.padDrag.startY);
-      if (dist < 3) return;
+      const minDist = ui.padDrag.isTouchLike ? PAD_DRAG_TOUCH_DISTANCE_PX : PAD_DRAG_MOUSE_DISTANCE_PX;
+      if (dist < minDist) return;
+      if (ui.padDrag.isTouchLike && (performance.now() - ui.padDrag.startAtMs) < PAD_DRAG_TOUCH_HOLD_MS) return;
       const rect = div.getBoundingClientRect();
       ui.padDrag.started = true;
       ui.padDrag.offsetX = ui.padDrag.startX - rect.left;
@@ -395,13 +414,32 @@ export function buildPadCard(pad) {
 
   div.addEventListener('dragstart', e => { e.preventDefault(); });
 
-  div.querySelector('.pad-play-body').addEventListener('click', () => playPad(pad.id));
+  div.querySelector('.pad-play-body').addEventListener('click', () => {
+    if (ui.padReorderMode) return;
+    playPad(pad.id);
+  });
   div.querySelector('.pad-play-body').addEventListener('keydown', e => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); playPad(pad.id); }
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (ui.padReorderMode) return;
+      playPad(pad.id);
+    }
   });
   div.querySelector('.pad-settings-btn').addEventListener('click', e => {
     e.stopPropagation();
     openPadModal(pad.id);
+  });
+
+  div.querySelector('.pad-delete-btn').addEventListener('click', async e => {
+    e.stopPropagation();
+    const confirmed = await showConfirmDialog({
+      title: 'Delete Sound',
+      message: `Delete "${pad.label}" from the board and all sequences?`,
+      confirmText: 'Delete Sound',
+      cancelText: 'Keep Sound',
+      danger: true,
+    });
+    if (confirmed) deletePad(pad.id);
   });
 
   const loopToggle = div.querySelector('.pad-loop-toggle');

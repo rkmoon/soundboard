@@ -8,6 +8,7 @@ export const { open: dialogOpen, save: dialogSave } = window.__TAURI__.dialog;
 // ── Persistence constants ─────────────────────────────────────
 export const AUTOSAVE_KEY          = 'soundboard.autosave.v1';
 export const AUTOSAVE_INTERVAL_MS  = 1400;
+export const SILENCE_STEP_PAD_ID    = '__silence__';
 
 // ── Layout constants ──────────────────────────────────────────
 export const SEQ_LIST_ONLY_WIDTH       = 236;
@@ -43,6 +44,9 @@ export const ui = {
   editingPadId:  null,         // pad being edited in modal
   currentSeqId:  null,         // sequence shown in editor
   padDrag:       null,
+  padReorderMode: false,
+  padSizePercent: 100,
+  tabletMode:    false,
   seqPanelOpen:  true,
   seqEditorOpen: false,
   seqPanelWidth: null,

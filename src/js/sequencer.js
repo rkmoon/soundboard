@@ -2,7 +2,7 @@
 //  SEQUENCER — transport engine (play / advance / stop)
 // ═══════════════════════════════════════════════════════════════
 
-import { rt, getSeq, getPad, getEffectiveStepCrossfade } from './state.js';
+import { rt, SILENCE_STEP_PAD_ID, getSeq, getPad, getEffectiveStepCrossfade } from './state.js';
 import { ensureHowl, stopPad, clearPadActive, getPadClipBounds, getPadBaseVolume, applyPadOutputGain } from './audio.js';
 import {
   updateSeqStepHighlight,
@@ -26,6 +26,7 @@ export async function playSequence(seqId) {
 
   // Pre-load all pads used in this sequence
   for (const step of seq.steps) {
+    if (step.padId === SILENCE_STEP_PAD_ID) continue;
     const pad = getPad(step.padId);
     if (pad) await ensureHowl(pad);
   }
@@ -52,6 +53,17 @@ export async function advanceSequencer(stepIdx, crossfadeInMs) {
   updateSeqStepHighlight();
 
   const step = seq.steps[stepIdx];
+  if (step.padId === SILENCE_STEP_PAD_ID) {
+    const silenceMs = Math.max(0.1, step.duration || 1) * 1000;
+    rt.seqCurrentHowl = null;
+    rt.seqCurrentSoundId = undefined;
+    rt.seqTimers.push(setTimeout(async () => {
+      if (rt.seqState !== 'playing' || rt.seqStep !== stepIdx) return;
+      await advanceSequencer(stepIdx + 1, 0);
+    }, silenceMs));
+    return;
+  }
+
   const pad  = getPad(step.padId);
   if (!pad) {
     await advanceSequencer(stepIdx + 1, 0);
