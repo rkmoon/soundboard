@@ -151,7 +151,7 @@ jobs:
             if grep -q -- '--no-codesign' /tmp/tauri-ios-help.txt; then
               npm run tauri -- ios build --no-codesign
             elif grep -q -- '--export-method' /tmp/tauri-ios-help.txt; then
-              npm run tauri -- ios build --export-method development
+              npm run tauri -- ios build --export-method debugging
             else
               npm run tauri -- ios build
             fi
